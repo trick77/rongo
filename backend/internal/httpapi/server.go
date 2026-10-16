@@ -17,6 +17,7 @@ import (
 	"github.com/trick77/rongo/web"
 	kitauth "github.com/trick77/ship/kit/auth"
 	"github.com/trick77/ship/kit/httpx"
+	"github.com/trick77/ship/kit/ratelimit"
 	"github.com/trick77/ship/kit/version"
 )
 
@@ -211,14 +212,14 @@ type Server struct {
 	// cannot be chosen twice before its first answer has closed it.
 	claims *claims
 	// logins is the password login's brake; see loginGap.
-	logins *httpx.Throttle
+	logins *ratelimit.Throttle
 }
 
 // NewServer builds the router and wraps it in the middleware chain once,
 // rather than per request.
 func NewServer(deps Deps) *Server {
 	s := &Server{deps: deps, mux: http.NewServeMux(), turns: newTurns(), claims: newClaims(),
-		logins: httpx.NewThrottle(loginGap, loginMaxWait)}
+		logins: ratelimit.NewThrottle(loginGap, loginMaxWait)}
 	s.routes()
 	s.handler = chain(s.mux)
 	return s

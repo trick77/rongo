@@ -9,7 +9,7 @@ import (
 
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/store/storetest"
-	"github.com/trick77/ship/kit/httpx"
+	"github.com/trick77/ship/kit/ratelimit"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -121,7 +121,7 @@ func TestAuthLogout_passwordModeSaysLocal(t *testing.T) {
 // come back. Another client is not held.
 func TestPasswordLoginIsThrottledPerClient(t *testing.T) {
 	srv := passwordServer(t)
-	srv.logins = httpx.NewThrottle(50*time.Millisecond, 0)
+	srv.logins = ratelimit.NewThrottle(50*time.Millisecond, 0)
 	wrong := `{"username":"admin","password":"hunter3"}`
 
 	if rec := postPassword(srv, wrong); rec.Code != http.StatusUnauthorized {

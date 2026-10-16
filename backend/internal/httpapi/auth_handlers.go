@@ -63,7 +63,7 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	key := ratelimit.Key(clientIP(r))
 	if err := s.logins.Wait(r.Context(), key); err != nil {
-		var throttled *httpx.ThrottledError
+		var throttled *ratelimit.ThrottledError
 		if errors.As(err, &throttled) {
 			httpx.TooManyRequests(w, throttled.RetryAfter)
 			return
