@@ -185,7 +185,16 @@ type Config struct {
 	// a loopback listener may switch it off. Set in any other mode, it is
 	// refused: there it would look active and change nothing.
 	CookieSecure bool
+	// SessionKey signs kit's session cookie: BACKEND_SESSION_SECRET, required
+	// in password and oidc mode (the modes that issue one) and refused
+	// elsewhere. Rotating it signs everyone out; a generated one would do
+	// that on every restart.
+	SessionKey []byte
 }
+
+// minSessionSecret is the shortest BACKEND_SESSION_SECRET accepted, kit's
+// floor for the HMAC key.
+const minSessionSecret = 32
 
 // DefaultLLMTimeout bounds one model call, body included. The answer call is
 // the longest: it streams its whole cap, which is ask's 16384-token answer
@@ -218,6 +227,7 @@ func Load() (Config, error) {
 	// Read in every mode so a malformed value is refused in every mode, and
 	// kept only where it means something: password mode, below.
 	cookieSecure := r.Bool("BACKEND_COOKIE_SECURE", true)
+	sessionSecret := r.String("BACKEND_SESSION_SECRET", "")
 	cfg := Config{
 		Addr:      r.String("BACKEND_ADDR", "127.0.0.1:8080"),
 		DBPath:    r.String("BACKEND_DB_PATH", "./data/rongo.db"),
@@ -309,6 +319,9 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("BACKEND_AUTH_MODE=token requires BACKEND_ADMIN_TOKEN")
 		}
 	case AuthModePassword:
+		if err := sessionKey(&cfg, sessionSecret); err != nil {
+			return Config{}, err
+		}
 		if cfg.AdminUser == "" {
 			return Config{}, fmt.Errorf("BACKEND_AUTH_MODE=password requires BACKEND_ADMIN_USER")
 		}
@@ -328,6 +341,9 @@ func Load() (Config, error) {
 				"BACKEND_COOKIE_SECURE=false sends the session cookie over plain HTTP and is only allowed on a loopback address, got BACKEND_ADDR=%q", cfg.Addr)
 		}
 	case AuthModeOIDC:
+		if err := sessionKey(&cfg, sessionSecret); err != nil {
+			return Config{}, err
+		}
 		// Every one of these is fatal rather than a warning. A half-configured
 		// OIDC deployment starts, serves the SPA, and then refuses every login
 		// with a callback error — which looks like a provider outage rather
@@ -360,6 +376,9 @@ func Load() (Config, error) {
 	// A mode-bound setting set under a mode that never reads it looks
 	// active and changes nothing, which is the failure every other setting
 	// refuses: BACKEND_OIDC_ADMIN_GROUP under proxy mode gated nothing.
+	if sessionSecret != "" && cfg.SessionKey == nil {
+		return Config{}, fmt.Errorf("BACKEND_SESSION_SECRET is read in password and oidc mode only, got BACKEND_AUTH_MODE=%s; remove it", cfg.AuthMode)
+	}
 	for _, b := range modeBound {
 		if strings.TrimSpace(os.Getenv(b.name)) == "" || b.mode == cfg.AuthMode {
 			continue
@@ -425,6 +444,16 @@ var modeBound = []struct {
 
 // cookieSource says where a mode other than password takes the session
 // cookie's Secure flag from, for the refusal of BACKEND_COOKIE_SECURE.
+// sessionKey installs the session secret in a mode that issues a cookie.
+func sessionKey(cfg *Config, secret string) error {
+	if len(secret) < minSessionSecret {
+		return fmt.Errorf("BACKEND_AUTH_MODE=%s requires BACKEND_SESSION_SECRET of at least %d bytes, e.g. openssl rand -base64 48",
+			cfg.AuthMode, minSessionSecret)
+	}
+	cfg.SessionKey = []byte(secret)
+	return nil
+}
+
 func cookieSource(mode AuthMode) string {
 	if mode == AuthModeOIDC {
 		return "it derives the flag from BACKEND_OIDC_REDIRECT_URL"

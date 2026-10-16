@@ -47,10 +47,14 @@ func UserFrom(ctx context.Context) (User, bool) {
 // does not positively identify a caller answers 401.
 func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// A valid session cookie wins in every mode.
-		if c, err := r.Cookie(SessionCookie); err == nil {
-			if u, ok := s.UserByToken(r.Context(), c.Value); ok {
-				next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), u)))
+		// A valid session cookie wins in the modes that issue one. Admin is
+		// read off the claims on every request, as the family does, so a
+		// changed admin group reaches live sessions; the password account is
+		// admin by mode.
+		if s.sessions != nil {
+			if c, ok := s.sessions.Read(r); ok {
+				admin := c.Subject == passwordSubject || isAdmin(c.Groups, s.oidcAdminGroup)
+				s.admitAs(w, r, next, "session", c.Subject, c.Email, admin)
 				return
 			}
 		}

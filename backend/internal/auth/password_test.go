@@ -7,35 +7,37 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/trick77/rongo/internal/store/storetest"
 	"golang.org/x/crypto/bcrypt"
 )
 
 func passwordService(t *testing.T) *Service {
 	t.Helper()
-	svc := newService(t)
-	svc.mode = "password"
+	svc := NewService(storetest.Open(t, 4), "password", "")
 	hash, err := bcrypt.GenerateFromPassword([]byte("hunter2"), bcrypt.MinCost)
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}
-	svc.SetPasswordAccount("admin", string(hash))
+	if err := svc.SetPasswordAccount("admin", string(hash)); err != nil {
+		t.Fatalf("SetPasswordAccount: %v", err)
+	}
 	return svc
 }
 
-func TestLoginPassword_mintsAnAdminSession(t *testing.T) {
+func TestLoginPassword_admitsTheAccountAsAdmin(t *testing.T) {
 	svc := passwordService(t)
 
-	token, _, err := svc.LoginPassword(context.Background(), "admin", "hunter2")
+	claims, err := svc.LoginPassword(context.Background(), "admin", "hunter2")
 
 	if err != nil {
 		t.Fatalf("LoginPassword() err = %v", err)
 	}
-	u, ok := svc.UserByToken(context.Background(), token)
-	if !ok {
-		t.Fatal("the minted token does not resolve")
+	if claims.Subject != passwordSubject {
+		t.Errorf("claims = %+v, want the fixed subject %q", claims, passwordSubject)
 	}
-	if u.Subject != passwordSubject || !u.IsAdmin {
-		t.Errorf("user = %+v, want admin %q", u, passwordSubject)
+	u, err := svc.UpsertUser(context.Background(), passwordSubject, "", true)
+	if err != nil || !u.IsAdmin {
+		t.Errorf("user = %+v %v, want the admin row", u, err)
 	}
 }
 
@@ -46,42 +48,45 @@ func TestLoginPassword_rejectsEitherHalfWrong(t *testing.T) {
 	for name, in := range map[string][2]string{
 		"wrong user":     {"root", "hunter2"},
 		"wrong password": {"admin", "hunter3"},
-		"empty":          {"", ""},
+		"both wrong":     {"root", "letmein"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := svc.LoginPassword(context.Background(), in[0], in[1])
-			if !errors.Is(err, ErrBadCredentials) {
-				t.Fatalf("err = %v, want ErrBadCredentials", err)
+			if _, err := svc.LoginPassword(context.Background(), in[0], in[1]); !errors.Is(err, ErrBadCredentials) {
+				t.Errorf("err = %v, want ErrBadCredentials", err)
 			}
 		})
 	}
 }
 
-// Outside password mode there is no account, so the right credentials for one
-// must not sign anyone in.
+// The hash is not even compared outside password mode: no account is
+// configured there.
 func TestLoginPassword_refusesInOtherModes(t *testing.T) {
 	svc := newService(t)
-	svc.SetPasswordAccount("admin", "$2a$04$irrelevant")
 
-	if _, _, err := svc.LoginPassword(context.Background(), "admin", "anything"); !errors.Is(err, ErrBadCredentials) {
-		t.Fatalf("err = %v, want ErrBadCredentials", err)
+	if _, err := svc.LoginPassword(context.Background(), "admin", "hunter2"); !errors.Is(err, ErrBadCredentials) {
+		t.Errorf("err = %v, want ErrBadCredentials in dev mode", err)
 	}
 }
 
-// The middleware's only way in is the cookie: a bearer token that would pass
-// token mode is nothing here.
+// A bcrypt hash that is not one is refused at setup, before any login.
+func TestSetPasswordAccount_refusesAPlaintextHash(t *testing.T) {
+	svc := NewService(storetest.Open(t, 4), "password", "")
+
+	if err := svc.SetPasswordAccount("admin", "hunter2"); err == nil {
+		t.Error("SetPasswordAccount() err = nil, want a refusal of a plaintext hash")
+	}
+}
+
+// Password mode has no way in but the cookie the form issues.
 func TestMiddleware_passwordModeAnswers401WithoutACookie(t *testing.T) {
 	svc := passwordService(t)
-	h := svc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
+	withSessions(t, svc, "")
+	var reached bool
 
-	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
-	req.Header.Set("Authorization", "Bearer hunter2")
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	svc.Middleware(protected(&reached)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/me", nil))
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
+	if reached || rec.Code != http.StatusUnauthorized {
+		t.Errorf("reached = %v status = %d, want 401 and the handler untouched", reached, rec.Code)
 	}
 }

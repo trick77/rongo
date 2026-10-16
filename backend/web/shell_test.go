@@ -202,8 +202,14 @@ func TestHandler_putsTheShareTitleInTheCard(t *testing.T) {
 			}
 			// The card is built from the request headers, so it must not be
 			// cached by anything in front keyed on the path alone.
-			if got := rec.Header().Get("Cache-Control"); got != "no-store" {
-				t.Errorf("Cache-Control = %q, want no-store", got)
+			// A share page is never cached; an ordinary shell revalidates (kit's
+			// ETag).
+			want := "no-cache"
+			if tc.noindex {
+				want = "no-store"
+			}
+			if got := rec.Header().Get("Cache-Control"); got != want {
+				t.Errorf("Cache-Control = %q, want %s", got, want)
 			}
 		})
 	}

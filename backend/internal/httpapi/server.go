@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
@@ -14,8 +15,17 @@ import (
 	"github.com/trick77/rongo/internal/timeline"
 	"github.com/trick77/rongo/internal/usage"
 	"github.com/trick77/rongo/web"
+	kitauth "github.com/trick77/ship/kit/auth"
 	"github.com/trick77/ship/kit/httpx"
 	"github.com/trick77/ship/kit/version"
+)
+
+// The password login's brake, kit's Throttle keyed by client: one attempt per
+// loginGap per client, queued up to loginMaxWait, refused past that with the
+// time until the queue takes the client again.
+const (
+	loginGap     = 500 * time.Millisecond
+	loginMaxWait = 5 * time.Second
 )
 
 // Threads is everything the HTTP layer needs from the thread record. An
@@ -138,13 +148,12 @@ type Deps struct {
 	// OIDCAdminGroup is the group that grants admin. Empty means no check; see
 	// auth.Service.CreateSessionFromClaims.
 	OIDCAdminGroup string
+	// Sessions is kit's signed-cookie store, issued by the password form and
+	// the OIDC callback, read by Auth. Nil in the modes that admit per
+	// request; the login routes answer 503 then.
+	Sessions *kitauth.Sessions
 	// Ready is what /readyz checks; none means ready while the process serves.
 	Ready []httpx.Check
-	// CookieSecure marks the session cookie Secure. It comes from the OIDC
-	// redirect URL or, in password mode, BACKEND_COOKIE_SECURE, because
-	// behind a TLS-terminating proxy the process only ever sees plain HTTP
-	// and nothing about the request says otherwise.
-	CookieSecure bool
 	// Repos backs the Repos page. Nil means this deployment cannot report
 	// repository status, which its endpoint says with a 503 rather than an
 	// empty list.
@@ -204,15 +213,15 @@ type Server struct {
 	// claims is the clarifications being answered right now, so a card
 	// cannot be chosen twice before its first answer has closed it.
 	claims *claims
-	// logins is the password login's failures per address; see
-	// loginThrottle.
-	logins *loginThrottle
+	// logins is the password login's brake; see loginGap.
+	logins *httpx.Throttle
 }
 
 // NewServer builds the router and wraps it in the middleware chain once,
 // rather than per request.
 func NewServer(deps Deps) *Server {
-	s := &Server{deps: deps, mux: http.NewServeMux(), turns: newTurns(), claims: newClaims(), logins: newLoginThrottle()}
+	s := &Server{deps: deps, mux: http.NewServeMux(), turns: newTurns(), claims: newClaims(),
+		logins: httpx.NewThrottle(loginGap, loginMaxWait)}
 	s.routes()
 	s.handler = chain(s.mux)
 	return s
@@ -280,7 +289,7 @@ func (s *Server) routes() {
 	// The shell is handed the share title so a link unfurls in Slack and X
 	// with the thread's own question — no crawler runs the JavaScript that
 	// would otherwise set it.
-	s.mux.Handle("/", web.HandlerWithShareTitles(s.shareTitle))
+	s.mux.Handle("/", web.Handler(s.shareTitle))
 }
 
 // authed mounts h behind requireAuth.

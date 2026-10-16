@@ -2,10 +2,12 @@ package auth
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/trick77/rongo/internal/store/storetest"
+	kitauth "github.com/trick77/ship/kit/auth"
 )
 
 func newService(t *testing.T) *Service {
@@ -14,129 +16,130 @@ func newService(t *testing.T) *Service {
 	return NewService(db, "dev", "")
 }
 
-func TestCreateSession_returnsTokenResolvableToUser(t *testing.T) {
-	// Given
+// withSessions installs a session store on svc with a fixed key.
+func withSessions(t *testing.T, svc *Service, adminGroup string) *kitauth.Sessions {
+	t.Helper()
+	sessions, err := NewSessions([]byte("0123456789abcdef0123456789abcdef"), true, adminGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetSessions(sessions)
+	svc.SetOIDCAdminGroup(adminGroup)
+	return sessions
+}
+
+// issued is the cookie Sessions.Issue sets for c.
+func issued(t *testing.T, sessions *kitauth.Sessions, c Claims) *http.Cookie {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	if err := sessions.Issue(rec, c); err != nil {
+		t.Fatal(err)
+	}
+	for _, ck := range rec.Result().Cookies() {
+		if ck.Name == SessionCookie {
+			return ck
+		}
+	}
+	t.Fatal("no session cookie issued")
+	return nil
+}
+
+// userSeen runs h behind svc.Middleware with cookie and reports the user the
+// handler saw.
+func userSeen(t *testing.T, svc *Service, cookie *http.Cookie) (User, int) {
+	t.Helper()
+	var got User
+	var ok bool
+	h := svc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, ok = UserFrom(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK && !ok {
+		t.Fatal("handler reached with no user on the context")
+	}
+	return got, rec.Code
+}
+
+// A session kit issued signs its subject in, admin by the group in its claims.
+func TestMiddleware_aSessionSignsItsSubjectIn(t *testing.T) {
 	svc := newService(t)
-	user, err := svc.UpsertUser(context.Background(), "dev-user", "dev@example.invalid", true)
-	if err != nil {
-		t.Fatalf("UpsertUser() err = %v", err)
-	}
+	svc.mode = "oidc"
+	sessions := withSessions(t, svc, "Rongo")
 
-	// When
-	token, err := svc.CreateSession(context.Background(), user.ID, 30*24*time.Hour)
-	if err != nil {
-		t.Fatalf("CreateSession() err = %v", err)
-	}
-	got, ok := svc.UserByToken(context.Background(), token)
+	u, code := userSeen(t, svc, issued(t, sessions, Claims{Subject: "authelia-sub-1", Email: "jan@example.com", Groups: []string{"Rongo"}}))
 
-	// Then
-	if !ok {
-		t.Fatal("UserByToken() ok = false, want true")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
 	}
-	if got.ID != user.ID {
-		t.Errorf("user id = %d, want %d", got.ID, user.ID)
+	if u.Subject != "authelia-sub-1" || u.Email != "jan@example.com" || !u.IsAdmin {
+		t.Errorf("user = %+v, want the admin member of Rongo", u)
 	}
 }
 
-func TestCreateSession_storesOnlyTheHash(t *testing.T) {
-	// Given: a database copy must not be replayable as a login.
+// Admin is read off the claims on every request: the configured group
+// changing reaches a live session, as it does in every service of the family.
+func TestMiddleware_adminFollowsTheGroupOnEveryRequest(t *testing.T) {
 	svc := newService(t)
-	user, _ := svc.UpsertUser(context.Background(), "dev-user", "dev@example.invalid", true)
+	svc.mode = "oidc"
+	sessions := withSessions(t, svc, "Rongo")
+	cookie := issued(t, sessions, Claims{Subject: "sub-1", Groups: []string{"Rongo"}})
 
-	// When
-	token, err := svc.CreateSession(context.Background(), user.ID, time.Hour)
-	if err != nil {
-		t.Fatalf("CreateSession() err = %v", err)
+	if u, _ := userSeen(t, svc, cookie); !u.IsAdmin {
+		t.Fatal("a member of the admin group is not admin")
 	}
-
-	// Then: the stored value must be exactly hashToken(token) — not merely
-	// "not equal to the raw token", which base64, a truncated hash, a
-	// constant, or an empty string would all also satisfy.
-	var storedHash string
-	if err := svc.db.QueryRow(
-		`SELECT token_hash FROM sessions WHERE user_id = ?`, user.ID,
-	).Scan(&storedHash); err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	if want := hashToken(token); storedHash != want {
-		t.Errorf("token_hash = %q, want %q (sha256 of the raw token)", storedHash, want)
+	svc.SetOIDCAdminGroup("Other")
+	if u, _ := userSeen(t, svc, cookie); u.IsAdmin {
+		t.Error("still admin after the group moved")
 	}
 }
 
-func TestUserByToken_rejectsExpiredSession(t *testing.T) {
-	// Given
+// The password account is admin by mode, whatever its claims carry.
+func TestMiddleware_thePasswordSessionIsAdmin(t *testing.T) {
 	svc := newService(t)
-	user, _ := svc.UpsertUser(context.Background(), "dev-user", "dev@example.invalid", true)
-	token, _ := svc.CreateSession(context.Background(), user.ID, -time.Minute) // already expired
+	svc.mode = "password"
+	sessions := withSessions(t, svc, "")
 
-	// When
-	_, ok := svc.UserByToken(context.Background(), token)
+	u, code := userSeen(t, svc, issued(t, sessions, Claims{Subject: passwordSubject}))
 
-	// Then
-	if ok {
-		t.Error("UserByToken() ok = true for an expired session, want false")
+	if code != http.StatusOK || u.Subject != passwordSubject || !u.IsAdmin {
+		t.Errorf("status %d user %+v, want the admin password account", code, u)
 	}
 }
 
-func TestUserByToken_rejectsUnknownToken(t *testing.T) {
+// A cookie kit did not sign is no session: a mode without another way in
+// answers 401.
+func TestMiddleware_rejectsAForgedCookie(t *testing.T) {
 	svc := newService(t)
+	svc.mode = "password"
+	withSessions(t, svc, "")
 
-	_, ok := svc.UserByToken(context.Background(), "not-a-real-token")
-
-	if ok {
-		t.Error("UserByToken() ok = true for an unknown token, want false")
+	if _, code := userSeen(t, svc, &http.Cookie{Name: SessionCookie, Value: "eyJzdWIiOiJ4In0.forged"}); code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", code)
 	}
 }
 
-func TestAnAbandonedRequestStopsItsSessionQueries(t *testing.T) {
-	// Given a session, and a request whose client has gone away
+// The store is written once per subject and admit interval, not per request.
+func TestMiddleware_aSessionAdmitsWithoutWritingOnEveryRequest(t *testing.T) {
 	svc := newService(t)
-	user, _ := svc.UpsertUser(context.Background(), "dev-user", "dev@example.invalid", true)
-	token, _ := svc.CreateSession(context.Background(), user.ID, time.Minute)
-	gone, cancel := context.WithCancel(context.Background())
-	cancel()
+	svc.mode = "oidc"
+	sessions := withSessions(t, svc, "")
+	cookie := issued(t, sessions, Claims{Subject: "sub-1"})
 
-	// When / Then nothing is read or written on its behalf
-	if _, ok := svc.UserByToken(gone, token); ok {
-		t.Error("UserByToken() resolved a session for a cancelled request")
+	for range 5 {
+		if _, code := userSeen(t, svc, cookie); code != http.StatusOK {
+			t.Fatalf("status = %d", code)
+		}
 	}
-	if _, err := svc.UpsertUser(gone, "late", "", false); err == nil {
-		t.Error("UpsertUser() wrote for a cancelled request")
+	if n := svc.upserts.Load(); n != 1 {
+		t.Errorf("wrote the user %d times, want once", n)
 	}
-	if _, err := svc.CreateSession(gone, user.ID, time.Minute); err == nil {
-		t.Error("CreateSession() wrote for a cancelled request")
-	}
-	if err := svc.DeleteSession(gone, token); err == nil {
-		t.Error("DeleteSession() wrote for a cancelled request")
-	}
-	if _, ok := svc.UserByToken(context.Background(), token); !ok {
-		t.Error("the session is gone, want it untouched by the cancelled delete")
-	}
-}
-
-func TestDeleteExpiredSessions_takesOnlyWhatHasExpired(t *testing.T) {
-	svc := newService(t)
-	u, err := svc.UpsertUser(context.Background(), "jan", "jan@example.invalid", true)
-	if err != nil {
-		t.Fatalf("upsert: %v", err)
-	}
-	live, err := svc.CreateSession(context.Background(), u.ID, time.Hour)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if _, err := svc.CreateSession(context.Background(), u.ID, time.Second); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-
-	n, err := svc.DeleteExpiredSessions(context.Background(), time.Now().Add(time.Minute))
-	if err != nil {
-		t.Fatalf("DeleteExpiredSessions: %v", err)
-	}
-
-	if n != 1 {
-		t.Errorf("deleted %d sessions, want the one that expired", n)
-	}
-	if _, ok := svc.UserByToken(context.Background(), live); !ok {
-		t.Error("the live session went with it")
+	if _, err := svc.Admit(context.Background(), "sub-1", "", true); err != nil {
+		t.Fatal(err)
 	}
 }

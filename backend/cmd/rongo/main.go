@@ -74,18 +74,6 @@ func sweepExcluded(ctx context.Context, state *indexer.StateStore, pipeline *ind
 	}
 }
 
-// sweepSessions deletes expired sessions once a day until ctx ends. The boot
-// already ran one; this is for a rongo that stays up for months.
-func sweepSessions(ctx context.Context, authSvc *auth.Service) {
-	for run.Sleep(ctx, 24*time.Hour) {
-		if n, err := authSvc.DeleteExpiredSessions(ctx, time.Now()); err != nil {
-			slog.Warn("delete expired sessions", "err", err)
-		} else if n > 0 {
-			slog.Info("expired sessions removed", "sessions", n)
-		}
-	}
-}
-
 // hashPassword reads a password from stdin and prints its bcrypt hash, the
 // value BACKEND_ADMIN_PASSWORD_HASH wants. Stdin, not an argument, so the
 // plaintext never lands in a shell history or a process list.
@@ -211,18 +199,23 @@ func main() {
 	}
 
 	authSvc := auth.NewService(db, string(cfg.AuthMode), cfg.AdminToken)
-	// Expired sessions are deleted at boot and once a day after; nothing
-	// else ever removes them, and a table that only grows is a table that
-	// one day does not fit.
-	if n, err := authSvc.DeleteExpiredSessions(ctx, time.Now()); err != nil {
-		slog.Error("delete expired sessions", "err", err)
-		os.Exit(1)
-	} else if n > 0 {
-		slog.Info("expired sessions removed", "sessions", n)
+	// kit's signed cookie in the modes that sign in: the claims travel in it,
+	// so there is no session table and nothing to sweep.
+	var sessions *kitauth.Sessions
+	if cfg.SessionKey != nil {
+		if sessions, err = auth.NewSessions(cfg.SessionKey, cfg.CookieSecure, cfg.OIDCAdminGroup); err != nil {
+			slog.Error("session cookie", "err", err)
+			os.Exit(1)
+		}
+		authSvc.SetSessions(sessions)
 	}
 	if cfg.AuthMode == config.AuthModePassword {
-		authSvc.SetPasswordAccount(cfg.AdminUser, cfg.AdminPasswordHash)
+		if err := authSvc.SetPasswordAccount(cfg.AdminUser, cfg.AdminPasswordHash); err != nil {
+			slog.Error("password account", "err", err)
+			os.Exit(1)
+		}
 	}
+	authSvc.SetOIDCAdminGroup(cfg.OIDCAdminGroup)
 	authSvc.SetProxyAdminGroup(cfg.ProxyAdminGroup)
 
 	// Built before the list is synced: a repository that left the list is purged
@@ -406,7 +399,7 @@ func main() {
 		Source:         source,
 		Commit:         source,
 		OIDCAdminGroup: cfg.OIDCAdminGroup,
-		CookieSecure:   cfg.CookieSecure,
+		Sessions:       sessions,
 		Ready:          []httpx.Check{{Name: "database", Run: db.PingContext}},
 	}
 	// Discovery talks to the provider, so a rongo that cannot reach Authelia
@@ -487,11 +480,6 @@ func main() {
 			poller.Run(pollCtx)
 		}()
 	}
-	workers.Add(1)
-	go func() {
-		defer workers.Done()
-		sweepSessions(pollCtx, authSvc)
-	}()
 	// kit's server: header and idle timeouts, no WriteTimeout (an answer
 	// streams for minutes). Serve returns when ctx ends and the drain is done,
 	// or when the listen fails. Then the background workers are stopped and

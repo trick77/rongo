@@ -40,6 +40,7 @@ func TestLoad_passwordModeRequiresUserAndHash(t *testing.T) {
 func TestLoad_passwordModeRejectsAPlaintextHash(t *testing.T) {
 	setEnv(t, map[string]string{
 		"BACKEND_AUTH_MODE":           "password",
+		"BACKEND_SESSION_SECRET":      testSecret,
 		"BACKEND_ADMIN_USER":          "admin",
 		"BACKEND_ADMIN_PASSWORD_HASH": "hunter2",
 	})
@@ -54,6 +55,7 @@ func TestLoad_passwordModeRejectsAPlaintextHash(t *testing.T) {
 func TestLoad_passwordModeCookieSecureDefaultsOn(t *testing.T) {
 	setEnv(t, map[string]string{
 		"BACKEND_AUTH_MODE":           "password",
+		"BACKEND_SESSION_SECRET":      testSecret,
 		"BACKEND_ADMIN_USER":          "admin",
 		"BACKEND_ADMIN_PASSWORD_HASH": testHash,
 	})
@@ -76,6 +78,7 @@ func TestLoad_passwordModeCookieSecureDefaultsOn(t *testing.T) {
 func TestLoad_passwordModeCookieSecureOffNeedsLoopback(t *testing.T) {
 	base := map[string]string{
 		"BACKEND_AUTH_MODE":           "password",
+		"BACKEND_SESSION_SECRET":      testSecret,
 		"BACKEND_ADMIN_USER":          "admin",
 		"BACKEND_ADMIN_PASSWORD_HASH": testHash,
 		"BACKEND_COOKIE_SECURE":       "false",

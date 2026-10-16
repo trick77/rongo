@@ -61,6 +61,9 @@ var allBackendEnvVars = []string{
 // mandatoryEnv is what .env.example leaves uncommented: the values nothing
 // defaults. setEnv seeds them so a test about something else doesn't have to
 // repeat them; a test about one of them overrides it with "".
+// testSecret is a BACKEND_SESSION_SECRET of the least length kit accepts.
+const testSecret = "0123456789abcdef0123456789abcdef"
+
 var mandatoryEnv = map[string]string{
 	"LLMWIRE_OPENAI_API_KEY": "embed-key",
 	"LLMWIRE_MIMO_API_KEY":   "llm-key",
@@ -362,6 +365,7 @@ func TestLoad_tokenModeRequiresAdminToken(t *testing.T) {
 func TestLoad_oidcModeRequiresTheWholeBlock(t *testing.T) {
 	full := map[string]string{
 		"BACKEND_AUTH_MODE":          "oidc",
+		"BACKEND_SESSION_SECRET":     testSecret,
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
 		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",
@@ -406,6 +410,7 @@ func TestLoad_oidcModeRequiresTheWholeBlock(t *testing.T) {
 func TestLoad_trimsTrailingSlashFromIssuer(t *testing.T) {
 	setEnv(t, map[string]string{
 		"BACKEND_AUTH_MODE":          "oidc",
+		"BACKEND_SESSION_SECRET":     testSecret,
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com/",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
 		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",
@@ -429,6 +434,7 @@ func TestLoad_trimsTrailingSlashFromIssuer(t *testing.T) {
 func TestLoad_oidcModeRejectsAnHttpRedirectURL(t *testing.T) {
 	setEnv(t, map[string]string{
 		"BACKEND_AUTH_MODE":          "oidc",
+		"BACKEND_SESSION_SECRET":     testSecret,
 		"BACKEND_ADDR":               "0.0.0.0:8080",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
@@ -448,6 +454,7 @@ func TestLoad_derivesCookieSecureFromTheRedirectURL(t *testing.T) {
 	// Given a complete oidc setup
 	setEnv(t, map[string]string{
 		"BACKEND_AUTH_MODE":          "oidc",
+		"BACKEND_SESSION_SECRET":     testSecret,
 		"BACKEND_ADDR":               "0.0.0.0:8080",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
@@ -620,6 +627,7 @@ func TestLoad_aMalformedSettingRefusesToStart(t *testing.T) {
 func oidcEnv() map[string]string {
 	env := map[string]string{
 		"BACKEND_AUTH_MODE":          "oidc",
+		"BACKEND_SESSION_SECRET":     testSecret,
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
 		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",
@@ -640,6 +648,7 @@ func TestLoad_cookieSecureMalformedIsRefusedInEveryMode(t *testing.T) {
 	for name, env := range map[string]map[string]string{
 		"password": {
 			"BACKEND_AUTH_MODE":           "password",
+			"BACKEND_SESSION_SECRET":      testSecret,
 			"BACKEND_ADMIN_USER":          "jan",
 			"BACKEND_ADMIN_PASSWORD_HASH": string(hash),
 		},
@@ -742,5 +751,38 @@ func TestLoad_aModeBoundSettingIsRefusedInAModeThatNeverReadsIt(t *testing.T) {
 				t.Errorf("Load() err = %v, want a refusal naming %s and the mode", err, tc.key)
 			}
 		})
+	}
+}
+
+// The session secret is read where a cookie is issued and refused elsewhere,
+// like every other mode-bound setting; a short one is refused too, a random
+// one would sign everyone out on every restart.
+func TestLoad_sessionSecretIsBoundToTheModesThatIssueACookie(t *testing.T) {
+	setEnv(t, map[string]string{"BACKEND_AUTH_MODE": "dev", "BACKEND_SESSION_SECRET": testSecret})
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "BACKEND_SESSION_SECRET") {
+		t.Errorf("dev mode with a secret: err = %v, want a refusal naming it", err)
+	}
+
+	env := oidcEnv()
+	env["BACKEND_SESSION_SECRET"] = "short"
+	setEnv(t, env)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "BACKEND_SESSION_SECRET") {
+		t.Errorf("a short secret: err = %v, want a refusal naming it", err)
+	}
+
+	delete(env, "BACKEND_SESSION_SECRET")
+	setEnv(t, env)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "BACKEND_SESSION_SECRET") {
+		t.Errorf("oidc without a secret: err = %v, want a refusal naming it", err)
+	}
+
+	env["BACKEND_SESSION_SECRET"] = testSecret
+	setEnv(t, env)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() err = %v", err)
+	}
+	if string(cfg.SessionKey) != testSecret {
+		t.Errorf("SessionKey = %q, want the secret", cfg.SessionKey)
 	}
 }

@@ -11,33 +11,46 @@ import (
 
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/store/storetest"
+	kitauth "github.com/trick77/ship/kit/auth"
 )
 
-// A deployment in dev or token mode has no OIDC service. The route must say so
-// rather than panic on a nil dependency.
+// testSessions is kit's session store with a fixed key, installed on svc.
+func testSessions(t *testing.T, svc *auth.Service, adminGroup string) *kitauth.Sessions {
+	t.Helper()
+	sessions, err := auth.NewSessions([]byte("0123456789abcdef0123456789abcdef"), true, adminGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetSessions(sessions)
+	svc.SetOIDCAdminGroup(adminGroup)
+	return sessions
+}
+
+// sessionCookie is the cookie sessions issues for c.
+func sessionCookie(t *testing.T, sessions *kitauth.Sessions, c auth.Claims) *http.Cookie {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	if err := sessions.Issue(rec, c); err != nil {
+		t.Fatal(err)
+	}
+	return cookie(t, rec, auth.SessionCookie)
+}
+
 func TestAuthLogin_returns503WithoutOIDC(t *testing.T) {
-	// Given
 	srv := NewServer(Deps{Auth: devAuth(t)})
 
-	// When
 	rec := do(srv, httptest.NewRequest(http.MethodGet, "/api/auth/login", nil))
 
-	// Then
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
 	}
 }
 
-// Login must not sit behind requireAuth: the caller has no session yet, so a
-// 401 here would be a redirect loop between the SPA and the login route.
 func TestAuthLogin_isReachableWithoutASession(t *testing.T) {
-	// Given
 	srv := NewServer(Deps{Auth: devAuth(t), OIDC: &fakeOIDC{}})
 
-	// When
 	rec := do(srv, httptest.NewRequest(http.MethodGet, "/api/auth/login", nil))
 
-	// Then
 	if rec.Code != http.StatusFound {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
 	}
@@ -47,17 +60,16 @@ func TestAuthLogin_isReachableWithoutASession(t *testing.T) {
 }
 
 func TestAuthCallback_setsSessionCookieAndRedirectsToTheApp(t *testing.T) {
-	// Given
+	svc := auth.NewService(storetest.Open(t, 4), "oidc", "")
+	sessions := testSessions(t, svc, "")
 	srv := NewServer(Deps{
-		Auth:         devAuth(t),
-		OIDC:         &fakeOIDC{claims: auth.Claims{Subject: "sub-1", Email: "jan@example.com"}},
-		CookieSecure: true,
+		Auth:     svc,
+		OIDC:     &fakeOIDC{claims: auth.Claims{Subject: "sub-1", Email: "jan@example.com"}},
+		Sessions: sessions,
 	})
 
-	// When
 	rec := do(srv, httptest.NewRequest(http.MethodGet, "/api/auth/callback?code=abc&state=xyz", nil))
 
-	// Then
 	if rec.Code != http.StatusFound {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
 	}
@@ -68,25 +80,28 @@ func TestAuthCallback_setsSessionCookieAndRedirectsToTheApp(t *testing.T) {
 	if c.Value == "" {
 		t.Fatal("session cookie has no value")
 	}
-	if !c.Secure {
-		t.Error("session cookie is not Secure although the public URL is https")
+	if !c.Secure || !c.HttpOnly {
+		t.Errorf("cookie = %+v, want Secure and HttpOnly", c)
+	}
+	// The cookie signs the subject in.
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.AddCookie(c)
+	me := do(srv, req)
+	if me.Code != http.StatusOK || !strings.Contains(me.Body.String(), `"sub-1"`) {
+		t.Errorf("/api/me with the cookie = %d %s, want the subject", me.Code, me.Body.String())
 	}
 }
 
-// The browser learns only that the callback failed. Which of the four failure
-// modes it was stays in the log, because telling them apart from outside is
-// what probing the callback is for.
 func TestAuthCallback_redirectsWithGenericErrorOnFailure(t *testing.T) {
-	// Given
+	svc := auth.NewService(storetest.Open(t, 4), "oidc", "")
 	srv := NewServer(Deps{
-		Auth: devAuth(t),
-		OIDC: &fakeOIDC{err: errors.New("exchange oidc code: provider said no")},
+		Auth:     svc,
+		OIDC:     &fakeOIDC{err: errors.New("exchange oidc code: provider said no")},
+		Sessions: testSessions(t, svc, ""),
 	})
 
-	// When
 	rec := do(srv, httptest.NewRequest(http.MethodGet, "/api/auth/callback?state=bad", nil))
 
-	// Then
 	if got := rec.Header().Get("Location"); got != "/?auth_error=oidc_callback_failed" {
 		t.Fatalf("Location = %q, want the generic error", got)
 	}
@@ -95,38 +110,29 @@ func TestAuthCallback_redirectsWithGenericErrorOnFailure(t *testing.T) {
 	}
 }
 
-func TestAuthLogout_revokesTheSessionAndClearsTheCookie(t *testing.T) {
-	// Given
-	svc := devAuth(t)
-	token, _, _, err := svc.CreateSessionFromClaims(context.Background(), auth.Claims{Subject: "sub-1"}, "")
-	if err != nil {
-		t.Fatalf("CreateSessionFromClaims() err = %v", err)
-	}
-	srv := NewServer(Deps{Auth: svc, CookieSecure: true})
+// Logout clears the cookie; there is nothing to revoke, the claims travel in
+// it. The redirect names where the browser goes next.
+func TestAuthLogout_clearsTheCookie(t *testing.T) {
+	svc := auth.NewService(storetest.Open(t, 4), "oidc", "")
+	sessions := testSessions(t, svc, "")
+	srv := NewServer(Deps{Auth: svc, Sessions: sessions})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
-	req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: token})
+	req.AddCookie(sessionCookie(t, sessions, auth.Claims{Subject: "sub-1"}))
 
-	// When
 	rec := do(srv, req)
 
-	// Then
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	var body map[string]string
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	// Not "/": the provider's session survives this, so landing on the app root
-	// would redirect to the provider and sign the user straight back in.
 	if body["redirect_url"] != "/?signed_out=1" {
 		t.Errorf("redirect_url = %q, want %q", body["redirect_url"], "/?signed_out=1")
 	}
 	if c := cookie(t, rec, auth.SessionCookie); c.Value != "" || c.MaxAge >= 0 {
 		t.Errorf("session cookie = %+v, want it cleared", c)
-	}
-	if _, ok := svc.UserByToken(context.Background(), token); ok {
-		t.Error("the session still resolves after logout")
 	}
 }
 
@@ -161,16 +167,13 @@ func (f *fakeOIDC) Callback(http.ResponseWriter, *http.Request) (auth.Claims, er
 }
 
 func TestAuthLogin_proxyModeSendsTheBrowserToTheApp(t *testing.T) {
-	// Given: the proxy in front already signed the browser in.
 	svc := auth.NewService(storetest.Open(t, 4), "proxy", "")
 	srv := NewServer(Deps{Auth: svc})
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/login", nil)
 	req.Header.Set(auth.ProxyUserHeader, "jdoe")
 
-	// When
 	rec := do(srv, req)
 
-	// Then
 	if rec.Code != http.StatusFound {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
 	}
@@ -180,15 +183,11 @@ func TestAuthLogin_proxyModeSendsTheBrowserToTheApp(t *testing.T) {
 }
 
 func TestAuthLogin_proxyModeHaltsWhenTheProxyNamesNobody(t *testing.T) {
-	// Given: a proxy that forwards without the user header. Sending the
-	// browser to the root would 401 and come straight back here.
 	svc := auth.NewService(storetest.Open(t, 4), "proxy", "")
 	srv := NewServer(Deps{Auth: svc})
 
-	// When
 	rec := do(srv, httptest.NewRequest(http.MethodGet, "/api/auth/login", nil))
 
-	// Then
 	if rec.Code != http.StatusFound {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
 	}
@@ -197,41 +196,14 @@ func TestAuthLogin_proxyModeHaltsWhenTheProxyNamesNobody(t *testing.T) {
 	}
 }
 
-func TestAuthLogout_revokesEvenWhenTheTabClosedOnTheWayOut(t *testing.T) {
-	// Given a session, and a logout whose client goes away once the request
-	// is past the door
-	svc := devAuth(t)
-	token, _, _, err := svc.CreateSessionFromClaims(context.Background(), auth.Claims{Subject: "sub-1"}, "")
-	if err != nil {
-		t.Fatalf("CreateSessionFromClaims() err = %v", err)
-	}
-	srv := NewServer(Deps{Auth: svc, CookieSecure: true})
-	gone, cancel := context.WithCancel(context.Background())
-	cancel()
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil).WithContext(gone)
-	req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: token})
-
-	// When
-	srv.handleAuthLogout(httptest.NewRecorder(), req)
-
-	// Then the token is worth nothing: the cleared cookie never reached that
-	// browser, so the row is all that signs it out
-	if _, ok := svc.UserByToken(context.Background(), token); ok {
-		t.Error("the session survived a logout whose request was abandoned")
-	}
-}
-
 func TestAuthLogout_proxyModeHandsOffToTheProxy(t *testing.T) {
-	// Given
 	svc := auth.NewService(storetest.Open(t, 4), "proxy", "")
-	srv := NewServer(Deps{Auth: svc, CookieSecure: true})
+	srv := NewServer(Deps{Auth: svc})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	req.Header.Set(auth.ProxyUserHeader, "jdoe")
 
-	// When
 	rec := do(srv, req)
 
-	// Then
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
@@ -239,9 +211,20 @@ func TestAuthLogout_proxyModeHandsOffToTheProxy(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	// rongo holds no session of its own in proxy mode; only the proxy's
-	// sign-out ends the login.
 	if body["redirect_url"] != "/oauth/sign_out" {
 		t.Errorf("redirect_url = %q, want %q", body["redirect_url"], "/oauth/sign_out")
+	}
+}
+
+// An abandoned request is no failed login and no panic: the handler returns.
+func TestAuthLogout_withoutSessionsIsStillAnAnswer(t *testing.T) {
+	srv := NewServer(Deps{Auth: devAuth(t)})
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	rec := do(srv, httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil).WithContext(gone))
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
 	}
 }
