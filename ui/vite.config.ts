@@ -7,8 +7,8 @@ export default defineConfig({
   // The SPA is built straight into the Go binary's embed directory, which
   // also holds a tracked .gitkeep (see Makefile fe-build comment) so
   // `//go:embed all:dist` always has something to embed. emptyOutDir:true
-  // would delete that tracked file on every build; the Makefile's fe-build
-  // target does the stale-asset cleanup instead, so leave this false.
+  // would delete that tracked file on every build; ship check (ui.embed) and
+  // make fe-build do the stale-asset cleanup instead, so leave this false.
   build: { outDir: "../backend/web/dist", emptyOutDir: false },
   server: {
     host: "127.0.0.1",

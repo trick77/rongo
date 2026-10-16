@@ -12,19 +12,10 @@ go.work.sum
 node_modules
 ui/dist/
 ui/.vite/
-# tsc -b build-mode stamp file, written by the UI typecheck.
-ui/tsconfig.tsbuildinfo
 .eslintcache
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
-
-# The SPA is built into the Go binary's embed dir. The placeholder lives at
-# backend/web/placeholder.html instead, so `vite build`'s emptyOutDir never
-# clobbers a tracked file. Only .gitkeep belongs in git here — it keeps the
-# directory embeddable via //go:embed before the first build ever runs.
-backend/web/dist/*
-!backend/web/dist/.gitkeep
 
 # ---------- SQLite ----------
 # The WAL sidecars are as untrackable as the database itself, and a bare
@@ -62,7 +53,6 @@ backend/web/dist/*
 /git-auth/
 
 # ---------- Test & coverage output ----------
-coverage/
 coverage.out
 coverage.xml
 *.cobertura.xml
@@ -111,3 +101,13 @@ repos.yaml
 # Never committed; pointed at through EVAL_REPOS_FILE, BACKEND_EVAL_FLOW_QUESTIONS,
 # BACKEND_EVAL_FLOW_EXPANSIONS and BACKEND_EVAL_RUBRICS (scripts/run-flow-eval.sh).
 backend/internal/retrieve/eval/private/
+
+# ship:begin (owned by ship init; the repo's own lines go above the begin marker)
+# What the gate and the UI build write into the tree.
+coverage/ui/
+ui/node_modules/
+ui/*.tsbuildinfo
+# The UI build the Go binary embeds; .gitkeep stays tracked so go:embed's dir exists in a fresh clone.
+backend/web/dist/*
+!backend/web/dist/.gitkeep
+# ship:end

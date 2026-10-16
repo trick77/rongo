@@ -4,7 +4,6 @@ go:
   # tests exercise reads as uncovered.
   coverpkg: ./...
 ui:
-  dir: ui
   embed: backend/web/dist
 steps:
   - { name: universal-ctags, run: scripts/ctags.sh }
