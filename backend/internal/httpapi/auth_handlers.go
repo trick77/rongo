@@ -102,7 +102,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/?auth_error=oidc_callback_failed", http.StatusFound)
 		return
 	}
-	if _, err := s.deps.Auth.AdmitClaims(r.Context(), claims, s.deps.OIDCAdminGroup); err != nil {
+	if _, err := s.deps.Auth.AdmitClaims(r.Context(), claims); err != nil {
 		slog.ErrorContext(r.Context(), "admit oidc user failed", "err", err)
 		http.Redirect(w, r, "/?auth_error=session_failed", http.StatusFound)
 		return

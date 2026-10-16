@@ -128,7 +128,8 @@ func TestChain_masksShareTokenInTheAccessLog(t *testing.T) {
 }
 
 // The panic line masks the token the same way, and the 500 carries the
-// family's error body.
+// family's error body and the security headers: they are set outside
+// recovery, which restores the header it found before writing the 500.
 func TestChain_masksShareTokenInThePanicLine(t *testing.T) {
 	buf := captureLog(t)
 	const token = "kd8Qw1rZx3Yv9pLmN0aB_c"
@@ -139,6 +140,9 @@ func TestChain_masksShareTokenInThePanicLine(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), `"error"`) {
 		t.Errorf("response = %d %s, want a 500 with an error body", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Content-Security-Policy") == "" || rec.Header().Get("X-Content-Type-Options") == "" {
+		t.Errorf("a 500 without the security headers: %v", rec.Header())
 	}
 	if strings.Contains(buf.String(), token) {
 		t.Errorf("token in the panic log: %s", buf.String())
@@ -168,5 +172,22 @@ func TestChain_refusesACrossSitePostAndSetsTheHeaders(t *testing.T) {
 	}
 	if rec.Header().Get("X-Content-Type-Options") == "" {
 		t.Error("no X-Content-Type-Options: the security headers are missing")
+	}
+}
+
+// Behind the proxy the client is the forwarded address; reached directly on
+// loopback the header is the caller's to forge, so the peer counts.
+func TestClientIP_trustsTheProxyOnlyWhenThereIsOne(t *testing.T) {
+	behind := httptest.NewRequest(http.MethodGet, "/", nil)
+	behind.RemoteAddr = "172.18.0.3:51234"
+	behind.Header.Set("X-Forwarded-For", "203.0.113.9")
+	if got := clientIP(behind); got != "203.0.113.9" {
+		t.Errorf("behind the proxy: %q, want the forwarded address", got)
+	}
+	direct := httptest.NewRequest(http.MethodGet, "/", nil)
+	direct.RemoteAddr = "127.0.0.1:51234"
+	direct.Header.Set("X-Forwarded-For", "203.0.113.9")
+	if got := clientIP(direct); got != "127.0.0.1" {
+		t.Errorf("direct on loopback: %q, want the peer", got)
 	}
 }

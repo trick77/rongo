@@ -143,3 +143,18 @@ func TestMiddleware_aSessionAdmitsWithoutWritingOnEveryRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The password account's admin-by-mode holds in password mode only: in oidc
+// mode a subject that happens to spell it is judged by its groups like any
+// other.
+func TestMiddleware_thePasswordSubjectIsNoAdminInOIDCMode(t *testing.T) {
+	svc := newService(t)
+	svc.mode = "oidc"
+	sessions := withSessions(t, svc, "Rongo")
+
+	u, code := userSeen(t, svc, issued(t, sessions, Claims{Subject: passwordSubject}))
+
+	if code != http.StatusOK || u.IsAdmin {
+		t.Errorf("status %d user %+v, want signed in and not admin", code, u)
+	}
+}

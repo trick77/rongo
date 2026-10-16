@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/trick77/ship/kit/httpx"
 	"github.com/trick77/ship/kit/secret"
@@ -50,10 +49,12 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 		// A valid session cookie wins in the modes that issue one. Admin is
 		// read off the claims on every request, as the family does, so a
 		// changed admin group reaches live sessions; the password account is
-		// admin by mode.
+		// admin by mode, in password mode only. HasGroup folds case like
+		// kit's own group cap does, so a group spelled unlike the IdP's still
+		// grants.
 		if s.sessions != nil {
 			if c, ok := s.sessions.Read(r); ok {
-				admin := c.Subject == passwordSubject || isAdmin(c.Groups, s.oidcAdminGroup)
+				admin := (s.mode == "password" && c.Subject == passwordSubject) || c.HasGroup(s.oidcAdminGroup)
 				s.admitAs(w, r, next, "session", c.Subject, c.Email, admin)
 				return
 			}
@@ -104,38 +105,6 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 			httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-	})
-}
-
-// SetSessionCookie writes the session cookie. secure comes from the OIDC
-// redirect URL: behind a TLS-terminating proxy the process only ever sees
-// plain HTTP, so nothing it can observe about the request says otherwise.
-func SetSessionCookie(w http.ResponseWriter, token string, secure bool, ttl time.Duration) {
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // HttpOnly and SameSite are set; Secure is config-driven so local development over plain HTTP still works
-		Name:     SessionCookie,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   secure,
-		Expires:  time.Now().Add(ttl),
-	})
-}
-
-// ClearSessionCookie expires the session cookie. Every attribute other than the
-// value matches what SetSessionCookie wrote: a browser keys a cookie by name,
-// domain and path, so a clear that differs in Path or Secure leaves the
-// original in place and the user stays signed in.
-func ClearSessionCookie(w http.ResponseWriter, secure bool) {
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // HttpOnly and SameSite are set; Secure is config-driven so local development over plain HTTP still works
-		Name:     SessionCookie,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   secure,
-		Expires:  time.Unix(0, 0),
-		MaxAge:   -1,
 	})
 }
 

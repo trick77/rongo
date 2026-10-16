@@ -145,9 +145,6 @@ type Deps struct {
 	// provider. Nil means this deployment has no OIDC (dev or token mode), and
 	// the two auth routes say so with a 503.
 	OIDC OIDCService
-	// OIDCAdminGroup is the group that grants admin. Empty means no check; see
-	// auth.Service.CreateSessionFromClaims.
-	OIDCAdminGroup string
 	// Sessions is kit's signed-cookie store, issued by the password form and
 	// the OIDC callback, read by Auth. Nil in the modes that admit per
 	// request; the login routes answer 503 then.

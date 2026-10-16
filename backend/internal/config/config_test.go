@@ -14,6 +14,7 @@ import (
 // exported in their shell doesn't fail an unrelated test.
 var allBackendEnvVars = []string{
 	"BACKEND_ADDR",
+	"BACKEND_SESSION_SECRET",
 	"BACKEND_DB_PATH",
 	"BACKEND_REPO_ROOT",
 	"BACKEND_AUTH_MODE",
@@ -784,5 +785,18 @@ func TestLoad_sessionSecretIsBoundToTheModesThatIssueACookie(t *testing.T) {
 	}
 	if string(cfg.SessionKey) != testSecret {
 		t.Errorf("SessionKey = %q, want the secret", cfg.SessionKey)
+	}
+}
+
+// Every parser of the level folds case; a deployment spelling INFO keeps
+// booting.
+func TestLoad_logLevelIsCaseInsensitive(t *testing.T) {
+	setEnv(t, map[string]string{"BACKEND_LOG_LEVEL": "WARN"})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() err = %v", err)
+	}
+	if cfg.LogLevel != "warn" {
+		t.Errorf("LogLevel = %q, want warn", cfg.LogLevel)
 	}
 }

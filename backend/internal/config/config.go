@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -272,8 +273,7 @@ func Load() (Config, error) {
 		AdminToken:        r.String("BACKEND_ADMIN_TOKEN", ""),
 		AdminUser:         r.String("BACKEND_ADMIN_USER", ""),
 		AdminPasswordHash: r.String("BACKEND_ADMIN_PASSWORD_HASH", ""),
-		// Lower-case, as kit's logging spells them.
-		LogLevel: r.Enum("BACKEND_LOG_LEVEL", "info", "debug", "info", "warn", "error"),
+		LogLevel:          logLevel(r),
 		// The issuer is trimmed of its trailing slash for the same reason the
 		// endpoint URLs above are: a discovery URL built from
 		// "https://auth.example.com/" gets a double slash and 404s.
@@ -459,6 +459,19 @@ func cookieSource(mode AuthMode) string {
 		return "it derives the flag from BACKEND_OIDC_REDIRECT_URL"
 	}
 	return "it signs in without a session cookie"
+}
+
+// logLevel reads BACKEND_LOG_LEVEL, any case: kit's logging folds it, and a
+// deployment spelling INFO must keep booting. Lower-cased for the log line
+// that names it.
+func logLevel(r *env.Reader) string {
+	const name = "BACKEND_LOG_LEVEL"
+	v := strings.ToLower(r.String(name, "info"))
+	if !slices.Contains([]string{"debug", "info", "warn", "error"}, v) {
+		r.Fail("%s: %q, want one of debug, info, warn, error", name, v)
+		return "info"
+	}
+	return v
 }
 
 // positive is r.Int for a setting that must be above zero.

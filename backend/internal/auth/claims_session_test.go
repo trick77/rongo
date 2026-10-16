@@ -9,7 +9,9 @@ func TestAdmitClaims_admitsAMemberOfTheGroupAsAdmin(t *testing.T) {
 	svc := newService(t)
 	claims := Claims{Subject: "authelia-sub-1", Email: "jan@example.com", Groups: []string{"Rongo"}}
 
-	user, err := svc.AdmitClaims(context.Background(), claims, "Rongo")
+	svc.SetOIDCAdminGroup("Rongo")
+
+	user, err := svc.AdmitClaims(context.Background(), claims)
 
 	if err != nil {
 		t.Fatalf("AdmitClaims() err = %v", err)
@@ -28,11 +30,11 @@ func TestAdmitClaims_reusesUserForSameSubject(t *testing.T) {
 	svc := newService(t)
 	claims := Claims{Subject: "authelia-sub-1", Email: "jan@example.com"}
 
-	first, err := svc.AdmitClaims(context.Background(), claims, "")
+	first, err := svc.AdmitClaims(context.Background(), claims)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := svc.AdmitClaims(context.Background(), claims, "")
+	second, err := svc.AdmitClaims(context.Background(), claims)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,8 +47,9 @@ func TestAdmitClaims_reusesUserForSameSubject(t *testing.T) {
 func TestAdmitClaims_deniesAdminWithoutTheGroup(t *testing.T) {
 	svc := newService(t)
 	claims := Claims{Subject: "authelia-sub-2", Groups: []string{"Readers"}}
+	svc.SetOIDCAdminGroup("Rongo")
 
-	user, err := svc.AdmitClaims(context.Background(), claims, "Rongo")
+	user, err := svc.AdmitClaims(context.Background(), claims)
 
 	if err != nil {
 		t.Fatalf("AdmitClaims() err = %v", err)
@@ -60,7 +63,7 @@ func TestAdmitClaims_deniesAdminWithoutTheGroup(t *testing.T) {
 func TestAdmitClaims_emptyAdminGroupGrantsAdmin(t *testing.T) {
 	svc := newService(t)
 
-	user, err := svc.AdmitClaims(context.Background(), Claims{Subject: "authelia-sub-3"}, "")
+	user, err := svc.AdmitClaims(context.Background(), Claims{Subject: "authelia-sub-3"})
 
 	if err != nil {
 		t.Fatalf("AdmitClaims() err = %v", err)
@@ -73,7 +76,20 @@ func TestAdmitClaims_emptyAdminGroupGrantsAdmin(t *testing.T) {
 func TestAdmitClaims_rejectsClaimsWithoutSubject(t *testing.T) {
 	svc := newService(t)
 
-	if _, err := svc.AdmitClaims(context.Background(), Claims{Email: "jan@example.com"}, ""); err == nil {
+	if _, err := svc.AdmitClaims(context.Background(), Claims{Email: "jan@example.com"}); err == nil {
 		t.Fatal("AdmitClaims() err = nil, want an error for claims without a subject")
+	}
+}
+
+// The group is compared as kit compares groups, case folded: an operator who
+// typed it unlike the IdP spells it still gets admins.
+func TestAdmitClaims_foldsTheGroupsCase(t *testing.T) {
+	svc := newService(t)
+	svc.SetOIDCAdminGroup("rongo")
+
+	user, err := svc.AdmitClaims(context.Background(), Claims{Subject: "sub-4", Groups: []string{"Rongo"}})
+
+	if err != nil || !user.IsAdmin {
+		t.Errorf("user = %+v %v, want admin by the folded group", user, err)
 	}
 }

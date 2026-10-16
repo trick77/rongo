@@ -355,9 +355,10 @@ func main() {
 	defer stopPolling()
 	var workers sync.WaitGroup
 	// Decided here, started below: the workers begin only after the last
-	// step that can still exit the process (provider discovery, the listen),
-	// so a fetch or an index transaction is never killed by a boot that
-	// failed for an unrelated reason.
+	// step that can still exit the process before the server (provider
+	// discovery), so a fetch or an index transaction is never killed by a
+	// boot that failed for an unrelated reason. A listen that fails is the
+	// one exception, and it stops the workers like a signal does.
 	indexing := false
 	switch {
 	case cfg.IndexEnabled && !listLoaded:
@@ -393,14 +394,13 @@ func main() {
 	// each was read at, so a re-index since the answer changes nothing.
 	source := sourceview.New(db, gitClient, cfg.IndexMaxFileBytes).WithCommits(gitClient)
 	deps := httpapi.Deps{
-		Auth:           authSvc,
-		Repos:          repostatus.New(db, moduleOpts(cfg)),
-		Threads:        threadStore.WithEvidence(source),
-		Source:         source,
-		Commit:         source,
-		OIDCAdminGroup: cfg.OIDCAdminGroup,
-		Sessions:       sessions,
-		Ready:          []httpx.Check{{Name: "database", Run: db.PingContext}},
+		Auth:     authSvc,
+		Repos:    repostatus.New(db, moduleOpts(cfg)),
+		Threads:  threadStore.WithEvidence(source),
+		Source:   source,
+		Commit:   source,
+		Sessions: sessions,
+		Ready:    []httpx.Check{{Name: "database", Run: db.PingContext}},
 	}
 	// Discovery talks to the provider, so a rongo that cannot reach Authelia
 	// fails here rather than coming up healthy and rejecting every login. The
@@ -489,7 +489,13 @@ func main() {
 	err = httpx.Serve(ctx, httpx.NewServer(cfg.Addr, srv), shutdownTimeout)
 	stopPolling()
 	workers.Wait()
-	if err != nil {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		// The drain outlasted the limit: kit closed the server, answers still
+		// streaming with it. A stop that took too long, not a failure; the cut
+		// turns are failed at the next boot (FailOrphaned).
+		slog.Warn("answers still streaming were cut short", "limit", shutdownTimeout.String())
+	case err != nil:
 		slog.Error("server stopped", "err", err)
 		os.Exit(1)
 	}

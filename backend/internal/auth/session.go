@@ -205,20 +205,21 @@ func (s *Service) UpsertUser(ctx context.Context, subject, email string, isAdmin
 // are the session to issue, and admin is decided again from their groups on
 // every request (Middleware), so a changed admin group reaches live sessions.
 //
-// adminGroup is the group whose members are admins. Empty means no group check
-// at all: every user the provider let through is an admin. That is peeq's
+// The admin group (SetOIDCAdminGroup) is the group whose members are admins,
+// compared as kit compares groups, case folded. Empty means no group check at
+// all: every user the provider let through is an admin. That is peeq's
 // default and the honest one while the authorization decision still lives
 // entirely in Authelia's authorization_policy — a group name invented here
 // would look like a second gate without being one.
-func (s *Service) AdmitClaims(ctx context.Context, claims Claims, adminGroup string) (User, error) {
+func (s *Service) AdmitClaims(ctx context.Context, claims Claims) (User, error) {
 	if claims.Subject == "" {
 		return User{}, errors.New("oidc claims carry no subject")
 	}
-	return s.UpsertUser(ctx, claims.Subject, claims.Email, isAdmin(claims.Groups, adminGroup))
+	return s.UpsertUser(ctx, claims.Subject, claims.Email, claims.HasGroup(s.oidcAdminGroup))
 }
 
-// isAdmin reports whether the claims carry the admin group. An empty group name
-// means the check is off; see AdmitClaims.
+// isAdmin reports whether the proxy's groups carry the admin group, spelled
+// as the proxy sends it. An empty group name means the check is off.
 func isAdmin(groups []string, adminGroup string) bool {
 	return adminGroup == "" || slices.Contains(groups, adminGroup)
 }
