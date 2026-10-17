@@ -93,7 +93,7 @@ func (s *Server) shareAction(w http.ResponseWriter, r *http.Request,
 		httpx.WriteError(w, http.StatusConflict, "This thread's first answer is still being written.")
 		return
 	default:
-		serverError(w, "share thread failed", err)
+		serverError(w, r, "share thread failed", err)
 		return
 	}
 	writeJSON(w, sh)
@@ -112,7 +112,7 @@ func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.deps.Threads.Shares(r.Context(), u.Subject)
 	if err != nil {
-		serverError(w, "list shares failed", err)
+		serverError(w, r, "list shares failed", err)
 		return
 	}
 	writeJSON(w, list)
@@ -244,7 +244,7 @@ func (s *Server) sharedCited(w http.ResponseWriter, r *http.Request, logMsg stri
 	}
 	cited, err := check(r.Context(), r.PathValue("token"))
 	if err != nil {
-		serverError(w, logMsg, err)
+		serverError(w, r, logMsg, err)
 		return false
 	}
 	if !cited {

@@ -218,7 +218,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req askRequest
-	if !decodeJSON(w, r, &req) {
+	if !httpx.DecodeJSON(w, r, &req, maxBody) {
 		return
 	}
 	req.Question = strings.TrimSpace(req.Question)
@@ -262,7 +262,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// this reader's: the two must not be told apart.
 	reqThreadID, found, err := s.deps.Threads.Resolve(ctx, req.ThreadID)
 	if err != nil {
-		internalError(ctx, w, "resolve thread failed", err)
+		serverError(w, r.WithContext(ctx), "resolve thread failed", err)
 		return
 	}
 	if req.ThreadID != "" && !found {
@@ -299,7 +299,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if req.ClarificationMessageID != 0 {
 		c, err := s.deps.Threads.Clarification(ctx, u.Subject, req.ClarificationMessageID)
 		if err != nil {
-			internalError(ctx, w, "resolve clarification failed", err)
+			serverError(w, r.WithContext(ctx), "resolve clarification failed", err)
 			return
 		}
 		if c == nil {
@@ -408,7 +408,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if !resumeRepoChoice {
 			_, hits, err = s.deps.Threads.CandidateHits(ctx, u.Subject, c.ID, req.Choice)
 			if err != nil {
-				internalError(ctx, w, "resolve candidate hits failed", err)
+				serverError(w, r.WithContext(ctx), "resolve candidate hits failed", err)
 				return
 			}
 		}
@@ -418,7 +418,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// writes loom's side out of its own training.
 		m, ok, err := s.deps.Threads.Message(ctx, u.Subject, req.ClarificationMessageID)
 		if err != nil {
-			internalError(ctx, w, "resolve clarification scope failed", err)
+			serverError(w, r.WithContext(ctx), "resolve clarification scope failed", err)
 			return
 		}
 		if ok {
@@ -456,7 +456,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if resume == nil && req.HeadMessageID != 0 {
 		head, ok, err := s.deps.Threads.Message(ctx, u.Subject, req.HeadMessageID)
 		if err != nil {
-			internalError(ctx, w, "resolve head message failed", err)
+			serverError(w, r.WithContext(ctx), "resolve head message failed", err)
 			return
 		}
 		// Refused, not explained — the same rule the clarification check
@@ -477,7 +477,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// created, so a refusal leaves no empty one behind.
 	ctx, err = s.memoryHolder(ctx, u.Subject)
 	if err != nil {
-		internalError(ctx, w, "read memories failed", err)
+		serverError(w, r.WithContext(ctx), "read memories failed", err)
 		return
 	}
 
@@ -512,7 +512,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		followUpIn = resume.ThreadID
 		if resumeMsg != nil {
 			if followUpBefore, err = s.headOrdinal(ctx, u.Subject, *resumeMsg); err != nil {
-				internalError(ctx, w, "resolve head ordinal failed", err)
+				serverError(w, r.WithContext(ctx), "resolve head ordinal failed", err)
 				return
 			}
 		}
@@ -532,7 +532,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		thread = threads.Thread{ID: retryHead.ThreadID}
 		followUpIn = retryHead.ThreadID
 		if followUpBefore, err = s.headOrdinal(ctx, u.Subject, *retryHead); err != nil {
-			internalError(ctx, w, "resolve head ordinal failed", err)
+			serverError(w, r.WithContext(ctx), "resolve head ordinal failed", err)
 			return
 		}
 		// "All repositories" travels with a true retry only: the reader gave
@@ -542,7 +542,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			prior.Pin = scope.Known
 			prior.All = scope.All && req.Question == retryHead.Question
 		} else if prior.Pin, err = s.deps.Threads.ThreadScope(ctx, u.Subject, retryHead.ThreadID); err != nil {
-			internalError(ctx, w, "read thread scope failed", err)
+			serverError(w, r.WithContext(ctx), "read thread scope failed", err)
 			return
 		}
 	default:
@@ -555,7 +555,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// A locked database is not a permissions problem, and its text is
 			// not for the browser — the same rule the error event below
 			// follows.
-			internalError(ctx, w, "resolve thread failed", err)
+			serverError(w, r.WithContext(ctx), "resolve thread failed", err)
 			return
 		}
 		thread = t
@@ -565,7 +565,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			followUpIn = reqThreadID
 			followUpBefore = math.MaxInt
 			if prior.Pin, err = s.deps.Threads.ThreadScope(ctx, u.Subject, reqThreadID); err != nil {
-				internalError(ctx, w, "read thread scope failed", err)
+				serverError(w, r.WithContext(ctx), "read thread scope failed", err)
 				return
 			}
 		}
@@ -579,7 +579,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if followUpIn != 0 {
 		last, ok, err := s.deps.Threads.LastTurnBefore(ctx, u.Subject, followUpIn, followUpBefore)
 		if err != nil {
-			internalError(ctx, w, "read last turn failed", err)
+			serverError(w, r.WithContext(ctx), "read last turn failed", err)
 			return
 		}
 		if ok {
@@ -593,7 +593,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// "summarize" afresh, which is worse than no answer.
 			refs, err := s.deps.Threads.SourceRefs(ctx, u.Subject, last.ID)
 			if err != nil {
-				internalError(ctx, w, "read last turn's sources failed", err)
+				serverError(w, r.WithContext(ctx), "read last turn's sources failed", err)
 				return
 			}
 			subject, id := u.Subject, last.ID
@@ -615,7 +615,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if thread.PublicID == "" {
 		publicID, err := s.deps.Threads.PublicIDFor(ctx, thread.ID)
 		if err != nil {
-			internalError(ctx, w, "read thread address failed", err)
+			serverError(w, r.WithContext(ctx), "read thread address failed", err)
 			return
 		}
 		thread.PublicID = publicID
@@ -628,7 +628,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), string(lang), req.Question, headID)
 	if err != nil {
-		internalError(ctx, w, "record question failed", err)
+		serverError(w, r.WithContext(ctx), "record question failed", err)
 		return
 	}
 	// Render-only, so a failure costs the chip and never the turn: the paste
@@ -903,7 +903,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		// one — which a re-explain always does — the record wins.
 		Language string `json:"language"`
 	}
-	if !decodeJSON(w, r, &req) {
+	if !httpx.DecodeJSON(w, r, &req, maxBody) {
 		return
 	}
 	audience := parseAudience(req.Audience)
@@ -914,7 +914,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	defer cancelTurn(nil)
 	msg, found, err := s.deps.Threads.Message(ctx, u.Subject, id)
 	if err != nil {
-		internalError(ctx, w, "resolve message failed", err)
+		serverError(w, r.WithContext(ctx), "resolve message failed", err)
 		return
 	}
 	if !found {
@@ -931,7 +931,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// to any answer: same reader, same rules.
 	ctx, err = s.memoryHolder(ctx, u.Subject)
 	if err != nil {
-		internalError(ctx, w, "read memories failed", err)
+		serverError(w, r.WithContext(ctx), "read memories failed", err)
 		return
 	}
 	lang := ask.ParseLanguage(msg.Language)
@@ -941,7 +941,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 
 	sources, total, err := s.deps.Threads.Sources(ctx, u.Subject, id)
 	if err != nil {
-		internalError(ctx, w, "resolve sources failed", err)
+		serverError(w, r.WithContext(ctx), "resolve sources failed", err)
 		return
 	}
 
@@ -973,7 +973,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// default -1: this row did not resume a clarification.
 	newMsg, err := s.deps.Threads.AddQuestion(ctx, msg.ThreadID, string(audience), string(lang), msg.Question, msg.Head())
 	if err != nil {
-		internalError(ctx, w, "record re-explain question failed", err)
+		serverError(w, r.WithContext(ctx), "record re-explain question failed", err)
 		return
 	}
 	// The row copies the question, so it copies the fold too.
@@ -1076,19 +1076,6 @@ func (s *Server) headOrdinal(ctx context.Context, subject string, m threads.Mess
 		return 0, nil
 	}
 	return ordinal, nil
-}
-
-// internalError answers 500 for a read or write the turn cannot go on
-// without, before the stream opens. A reader who closed the tab cancelled the
-// call, which is not a database fault and is not logged as one. The error's
-// text never reaches the browser.
-func internalError(ctx context.Context, w http.ResponseWriter, msg string, err error) {
-	if ctx.Err() != nil {
-		slog.Warn(msg, "cause", context.Cause(ctx).Error(), "err", err)
-	} else {
-		slog.Error(msg, "err", err)
-	}
-	httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 }
 
 // thread returns the thread this turn belongs to, creating one when the request

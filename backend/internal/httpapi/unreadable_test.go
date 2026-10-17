@@ -181,9 +181,9 @@ func TestAsk_aReworkWhoseAntecedentCannotBeReadFails(t *testing.T) {
 	})
 }
 
-// TestInternalError_aClosedTabIsNotADatabaseFault: the read failed because the
+// TestServerError_aClosedTabIsNotADatabaseFault: the read failed because the
 // reader left, and the log says so at Warn rather than paging anyone.
-func TestInternalError_aClosedTabIsNotADatabaseFault(t *testing.T) {
+func TestServerError_aClosedTabIsNotADatabaseFault(t *testing.T) {
 	var buf strings.Builder
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
@@ -192,7 +192,7 @@ func TestInternalError_aClosedTabIsNotADatabaseFault(t *testing.T) {
 	cancel()
 	rec := httptest.NewRecorder()
 
-	internalError(ctx, rec, "read thread scope failed", errLocked)
+	serverError(rec, httptest.NewRequest(http.MethodPost, "/", nil).WithContext(ctx), "read thread scope failed", errLocked)
 
 	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), errLocked.Error()) {
 		t.Errorf("status = %d body = %q, want a bare 500", rec.Code, rec.Body.String())

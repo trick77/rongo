@@ -126,7 +126,7 @@ func serveCited[T any](w http.ResponseWriter, r *http.Request, cited citedFunc, 
 	if err != nil && v.fromRecord(err) && cited != nil {
 		ok, cerr := cited(r.Context())
 		if cerr != nil {
-			serverError(w, v.citationLog, cerr)
+			serverError(w, r, v.citationLog, cerr)
 			return
 		}
 		if ok {
@@ -144,7 +144,7 @@ func serveCited[T any](w http.ResponseWriter, r *http.Request, cited citedFunc, 
 			httpx.WriteError(w, st.status, st.body)
 			return
 		}
-		serverError(w, v.readLog, err)
+		serverError(w, r, v.readLog, err)
 		return
 	}
 	writeJSON(w, out)

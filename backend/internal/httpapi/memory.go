@@ -26,7 +26,7 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Memory != nil {
 		rows, err := s.deps.Memory.List(r.Context(), u.Subject)
 		if err != nil {
-			serverError(w, "list memories failed", err)
+			serverError(w, r, "list memories failed", err)
 			return
 		}
 		out.Enabled, out.Memories = true, rows
@@ -52,7 +52,7 @@ func (s *Server) handleForgetMemory(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.deps.Memory.Remove(r.Context(), u.Subject, id)
 	if err != nil {
-		serverError(w, "forget memory failed", err)
+		serverError(w, r, "forget memory failed", err)
 		return
 	}
 	if !found {

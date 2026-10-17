@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -96,7 +97,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.deps.Repos.RepoStatus(r.Context())
 	if err != nil {
-		serverError(w, "repository status failed", err)
+		serverError(w, r, "repository status failed", err)
 		return
 	}
 
@@ -169,7 +170,7 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 	if name := r.PathValue("name"); name != "" {
 		found, err := s.deps.Reindex.RequestReindex(r.Context(), name)
 		if err != nil {
-			serverError(w, "re-index request failed", err, "repo", name)
+			serverError(w, r, "re-index request failed", fmt.Errorf("repo %s: %w", name, err))
 			return
 		}
 		if !found {
@@ -182,7 +183,7 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 	} else {
 		n, err := s.deps.Reindex.RequestReindexAll(r.Context())
 		if err != nil {
-			serverError(w, "re-index request failed", err)
+			serverError(w, r, "re-index request failed", err)
 			return
 		}
 		queued = n

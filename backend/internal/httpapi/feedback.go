@@ -25,7 +25,7 @@ func (s *Server) handleGetFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	owns, err := s.deps.Threads.Owns(r.Context(), u.Subject, id)
 	if err != nil {
-		serverError(w, "check thread owner failed", err)
+		serverError(w, r, "check thread owner failed", err)
 		return
 	}
 	if !owns {
@@ -34,7 +34,7 @@ func (s *Server) handleGetFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	fb, found, err := s.deps.Threads.Feedback(r.Context(), u.Subject, id)
 	if err != nil {
-		serverError(w, "read feedback failed", err)
+		serverError(w, r, "read feedback failed", err)
 		return
 	}
 	var body *threads.Feedback
@@ -53,7 +53,7 @@ func (s *Server) handlePutFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req feedbackRequest
-	if !decodeJSON(w, r, &req) {
+	if !httpx.DecodeJSON(w, r, &req, maxBody) {
 		return
 	}
 	if req.Verdict != 1 && req.Verdict != -1 {
@@ -67,7 +67,7 @@ func (s *Server) handlePutFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.deps.Threads.SetFeedback(r.Context(), u.Subject, id, req.Verdict, req.Reason)
 	if err != nil {
-		serverError(w, "set feedback failed", err)
+		serverError(w, r, "set feedback failed", err)
 		return
 	}
 	if !found {
@@ -76,7 +76,7 @@ func (s *Server) handlePutFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	fb, _, err := s.deps.Threads.Feedback(r.Context(), u.Subject, id)
 	if err != nil {
-		serverError(w, "read feedback failed", err)
+		serverError(w, r, "read feedback failed", err)
 		return
 	}
 	writeJSON(w, fb)
