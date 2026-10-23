@@ -13,27 +13,9 @@ import (
 	"github.com/trick77/rongo/internal/threads"
 )
 
-// noFlush is a ResponseWriter that cannot flush: sse.Open refuses it.
+// noFlush is a ResponseWriter that cannot flush. Behind kit's middleware it
+// fails the stream's first flush, after the 200.
 type noFlush struct{ http.ResponseWriter }
-
-// A writer that cannot flush is refused before anything is sent: a bare 500,
-// and false so the handler returns before the turn starts.
-func TestStream_aWriterThatCannotFlushIsA500(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/ask", nil)
-
-	st, ok := openStream(noFlush{rec}, req)
-
-	if ok || st != nil {
-		t.Fatalf("openStream = %v, %v; want nil, false", st, ok)
-	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", rec.Code)
-	}
-	if got := rec.Header().Get("Content-Type"); got != "application/json" {
-		t.Errorf("Content-Type = %q, want the JSON error, not an event stream", got)
-	}
-}
 
 // Events go out framed, and nothing is written once the stream is closed:
 // the title goroutine may still be sending when the handler returns.

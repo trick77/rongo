@@ -22,15 +22,11 @@ type sseStream struct {
 // status code is fixed, so every failure after this point is an SSE error
 // event, not a 500 the browser could still act on. A stream that fails to
 // open reports false and the caller returns before the turn is recorded or
-// paid for: there is nobody to send its events to. A writer that cannot
-// flush is refused with a 500, nothing being written yet; behind kit's
-// middleware that shows as a failed first flush instead, after the 200.
+// paid for: there is nobody to send its events to. Behind kit's middleware
+// the writer always claims to flush, so a failure is the first flush, after
+// the 200, and there is no status left to answer with.
 func openStream(w http.ResponseWriter, r *http.Request) (*sseStream, bool) {
 	sw, err := sse.Open(w)
-	if errors.Is(err, sse.ErrNoFlush) {
-		serverError(w, r, "open event stream failed", err)
-		return nil, false
-	}
 	if err != nil {
 		slog.WarnContext(r.Context(), "open event stream failed", "err", err)
 		return nil, false
