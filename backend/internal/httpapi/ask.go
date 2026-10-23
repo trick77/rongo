@@ -961,7 +961,9 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		// A vanished basis is its own message, not the generic turnFailed:
 		// the pipeline never ran, and the truth is that the code the answer
 		// was written from is no longer indexed.
-		openStream(w).send("error", map[string]any{"message": basisGone})
+		st := openStream(w)
+		st.send("error", map[string]any{"message": basisGone})
+		st.close()
 		return
 	}
 
