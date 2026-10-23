@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -153,8 +154,7 @@ func (s *Service) admitAs(w http.ResponseWriter, r *http.Request, next http.Hand
 		if errors.Is(err, context.Canceled) {
 			return
 		}
-		slog.Error(what+" failed", "err", err)
-		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
+		httpx.ServerError(w, r, fmt.Errorf("%s failed: %w", what, err), "internal server error")
 		return
 	}
 	next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), u)))
