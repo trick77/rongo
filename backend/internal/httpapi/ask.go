@@ -475,7 +475,8 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// The reader's standing instructions, read once here: the understanding
 	// step lists them, the answer is written under them, and a rule given in
 	// this very question joins them mid-turn. Read before a thread can be
-	// created, so a refusal leaves no empty one behind.
+	// created, so a refusal leaves no empty one behind (the refusals after
+	// it delete the thread again; see dropThread).
 	ctx, err = s.memoryHolder(ctx, u.Subject)
 	if err != nil {
 		serverError(w, r, "read memories failed", err)
@@ -493,6 +494,9 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// followUpIn is the thread whose last answered turn this one follows, 0
 	// for a turn that follows nothing.
 	var followUpIn int64
+	// created marks a thread this request made. Until its question is
+	// recorded it is an empty thread, and a refusal deletes it again.
+	var created bool
 	//
 	// The three shapes a turn can have — resumed from a card, a retry of a
 	// row, or typed into a thread — differ in which row they sit under and
@@ -560,6 +564,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		thread = t
+		created = reqThreadID == 0
 		if reqThreadID != 0 {
 			// Typed under the newest thing in the thread, so nothing bounds
 			// the read from above.
@@ -633,6 +638,9 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// and so runs first.
 	st, ok := openStream(w, r)
 	if !ok {
+		if created {
+			s.dropThread(ctx, u.Subject, thread.ID)
+		}
 		return
 	}
 	defer st.close()
@@ -641,6 +649,9 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), string(lang), req.Question, headID)
 	if err != nil {
 		turnStopped(ctx, "record question failed", thread.ID, err)
+		if created {
+			s.dropThread(ctx, u.Subject, thread.ID)
+		}
 		send("error", map[string]any{"message": turnFailed})
 		return
 	}
@@ -1090,6 +1101,17 @@ func (s *Server) headOrdinal(ctx context.Context, subject string, m threads.Mess
 		return 0, nil
 	}
 	return ordinal, nil
+}
+
+// dropThread deletes the thread a refused turn created before its question
+// was recorded: left behind, it reads "New question" in the rail for good, and
+// the browser, never told its address, would ask the retry into a second one.
+// WithoutCancel because the refusal may be the request's own cancel, and the
+// cleanup must still land.
+func (s *Server) dropThread(ctx context.Context, subject string, id int64) {
+	if _, err := s.deps.Threads.Delete(context.WithoutCancel(ctx), subject, id); err != nil {
+		slog.WarnContext(ctx, "drop empty thread failed", "thread", id, "err", err)
+	}
 }
 
 // thread returns the thread this turn belongs to, creating one when the request

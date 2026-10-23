@@ -2,11 +2,14 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/trick77/rongo/internal/threads"
 )
 
 // noFlush is a ResponseWriter that cannot flush: sse.Open refuses it.
@@ -56,7 +59,7 @@ func TestStream_framesEventsAndRefusesAfterClose(t *testing.T) {
 // A stream that cannot open is refused before the question is recorded and
 // before the paid turn starts. Behind the middleware the writer claims to
 // flush, so the failure is the first flush, after the 200: no events, no
-// turn, and no row for a turn that never ran.
+// turn, and no thread left behind for a turn that never ran.
 func TestAsk_aStreamThatCannotOpenStartsNoTurn(t *testing.T) {
 	// Given
 	asker := &fakeAsker{tokens: []string{"never"}}
@@ -79,14 +82,45 @@ func TestAsk_aStreamThatCannotOpenStartsNoTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	for _, th := range list {
-		msgs, err := st.Messages(context.Background(), testSubject, th.ID)
-		if err != nil {
-			t.Fatalf("Messages: %v", err)
-		}
-		if len(msgs) != 0 {
-			t.Errorf("thread %d holds %d messages, want none recorded", th.ID, len(msgs))
-		}
+	if len(list) != 0 {
+		t.Errorf("threads = %+v, want none left behind", list)
+	}
+}
+
+// addQuestionFailingThreads cannot record a question.
+type addQuestionFailingThreads struct {
+	*threads.Store
+}
+
+func (f *addQuestionFailingThreads) AddQuestion(context.Context, int64, string, string, string, int64) (threads.Message, error) {
+	return threads.Message{}, errors.New("disk full")
+}
+
+// A question that cannot be recorded fails the turn on the stream, and the
+// thread created for it goes again: the browser never learned its address,
+// so a retry would otherwise start a second one beside an empty first.
+func TestAsk_aQuestionThatCannotBeRecordedLeavesNoThread(t *testing.T) {
+	// Given
+	asker := &fakeAsker{tokens: []string{"never"}}
+	deps, st := askDeps(t, asker)
+	deps.Threads = &addQuestionFailingThreads{Store: st}
+
+	// When
+	rec := postAsk(t, deps, `{"question":"How does shipping work?","audience":"ba"}`)
+
+	// Then
+	if body := rec.Body.String(); !strings.Contains(body, "event: error") {
+		t.Errorf("body = %q, want an error event", body)
+	}
+	if asker.gotAud != "" {
+		t.Error("the turn ran without a recorded question")
+	}
+	list, err := st.List(context.Background(), testSubject)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 0 {
+		t.Errorf("threads = %+v, want none left behind", list)
 	}
 }
 
