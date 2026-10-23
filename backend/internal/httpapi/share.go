@@ -38,16 +38,6 @@ type publicShare struct {
 	CostUSD     *float64          `json:"cost_usd,omitempty"`
 }
 
-// noindex marks a public response as something no crawler and no cache should
-// keep. The X-Robots-Tag comes from the chain (publicSharePath); this adds the
-// no-store that goes with it, as it does on the served shell: the answer to a
-// capability URL is private data, and a shared cache in front that kept it
-// would go on serving a thread after its link was revoked. Set before anything
-// else is written, so it is on the 404 as well.
-func noindex(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "no-store")
-}
-
 // notFound is the one answer every public lookup gives for a token that is
 // unknown, revoked, or whose thread is gone. Telling those apart would let
 // someone guessing tokens learn which guesses were once real.
@@ -125,7 +115,6 @@ func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
 // to ask them with. Calls and Scope are already `json:"-"` on the message
 // itself.
 func (s *Server) handlePublicShare(w http.ResponseWriter, r *http.Request) {
-	noindex(w)
 	if s.deps.Threads == nil {
 		httpx.WriteError(w, http.StatusServiceUnavailable, "threads unavailable")
 		return
@@ -228,14 +217,13 @@ func (s *Server) handlePublicShareSource(w http.ResponseWriter, r *http.Request)
 	s.serveSource(w, r, repo, path, sha, alwaysCited)
 }
 
-// sharedCited is the public citation routes' gate: noindex, no record is a
-// 503, and the token must cover a turn citing what is asked for, or the
-// answer is the one 404 an unknown token gets. check asks the record with the
-// link's token; its failure is a 500 logged under logMsg.
+// sharedCited is the public citation routes' gate: no record is a 503, and
+// the token must cover a turn citing what is asked for, or the answer is the
+// one 404 an unknown token gets. check asks the record with the link's token;
+// its failure is a 500 logged under logMsg.
 func (s *Server) sharedCited(w http.ResponseWriter, r *http.Request, logMsg string,
 	check func(ctx context.Context, token string) (bool, error)) bool {
 
-	noindex(w)
 	if s.deps.Threads == nil {
 		httpx.WriteError(w, http.StatusServiceUnavailable, "threads unavailable")
 		return false
