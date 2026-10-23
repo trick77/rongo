@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/trick77/rongo/internal/threads"
 )
@@ -150,5 +151,37 @@ func TestReexplain_aStreamThatCannotOpenStartsNoTurn(t *testing.T) {
 	}
 	if len(msgs) != 1 {
 		t.Errorf("messages = %d, want only the original turn", len(msgs))
+	}
+}
+
+// deadWriter opens fine and fails every write after: a reader who left while
+// a proxy holds the connection, so the request is never cancelled.
+type deadWriter struct{ *httptest.ResponseRecorder }
+
+func (deadWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+
+// A stream whose writes fail closes, and the turn behind it stops: nobody is
+// reading, and the model calls would be paid for nothing.
+func TestAsk_aStreamThatDiesCancelsTheTurn(t *testing.T) {
+	// Given a stream that dies on its first event
+	var cause error
+	asker := &fakeAsker{tokens: []string{"never read"}}
+	asker.during = func(ctx context.Context) {
+		select {
+		case <-ctx.Done():
+			cause = context.Cause(ctx)
+		case <-time.After(2 * time.Second):
+		}
+	}
+	deps, _ := askDeps(t, asker)
+
+	// When
+	req := httptest.NewRequest(http.MethodPost, "/api/ask",
+		strings.NewReader(`{"question":"How does shipping work?","audience":"ba"}`))
+	NewServer(deps).ServeHTTP(deadWriter{httptest.NewRecorder()}, req)
+
+	// Then the turn was cancelled, as a stream gone rather than a failure
+	if !errors.Is(cause, errStreamGone) {
+		t.Errorf("turn's cause = %v, want errStreamGone", cause)
 	}
 }

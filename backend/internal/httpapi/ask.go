@@ -644,6 +644,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.close()
+	st.cancelOnClose(ctx, cancelTurn)
 	send := st.send
 
 	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), string(lang), req.Question, headID)
@@ -971,6 +972,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.close()
+	st.cancelOnClose(ctx, cancelTurn)
 	send := st.send
 
 	// The vanished-basis path writes nothing: it is decided before the new
