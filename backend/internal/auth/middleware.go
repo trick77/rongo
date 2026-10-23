@@ -2,7 +2,7 @@ package auth
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -149,12 +149,7 @@ func (s *Service) admit(w http.ResponseWriter, r *http.Request, next http.Handle
 func (s *Service) admitAs(w http.ResponseWriter, r *http.Request, next http.Handler, what, subject, email string, admin bool) {
 	u, err := s.Admit(r.Context(), subject, email, admin)
 	if err != nil {
-		// A request its client abandoned is not a failed login.
-		if errors.Is(err, context.Canceled) {
-			return
-		}
-		slog.Error(what+" failed", "err", err)
-		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
+		httpx.ServerError(w, r, fmt.Errorf("%s failed: %w", what, err), "internal server error")
 		return
 	}
 	next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), u)))

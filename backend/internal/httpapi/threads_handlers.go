@@ -32,7 +32,7 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 		StarredOnly: r.URL.Query().Get("starred") == "true",
 	})
 	if err != nil {
-		serverError(w, "list threads failed", err)
+		serverError(w, r, "list threads failed", err)
 		return
 	}
 	writeJSON(w, page)
@@ -72,7 +72,7 @@ func (s *Server) handleSearchThreads(w http.ResponseWriter, r *http.Request) {
 	}
 	hits, err := s.deps.Threads.Search(r.Context(), u.Subject, q, limit)
 	if err != nil {
-		serverError(w, "search threads failed", err)
+		serverError(w, r, "search threads failed", err)
 		return
 	}
 	writeJSON(w, struct {
@@ -92,7 +92,7 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	// "exists, but not yours" apart, while every other one answers 404 to both.
 	owns, err := s.deps.Threads.Owns(r.Context(), u.Subject, id)
 	if err != nil {
-		serverError(w, "check thread owner failed", err)
+		serverError(w, r, "check thread owner failed", err)
 		return
 	}
 	if !owns {
@@ -101,7 +101,7 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	}
 	msgs, err := s.deps.Threads.Messages(r.Context(), u.Subject, id)
 	if err != nil {
-		serverError(w, "read thread failed", err)
+		serverError(w, r, "read thread failed", err)
 		return
 	}
 	// Priced here, from the current table, never from a stored figure: the
@@ -128,7 +128,7 @@ func (s *Server) handleThreadSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	t, found, err := s.deps.Threads.Get(r.Context(), u.Subject, id)
 	if err != nil {
-		serverError(w, "read thread failed", err)
+		serverError(w, r, "read thread failed", err)
 		return
 	}
 	if !found {
@@ -153,7 +153,7 @@ func (s *Server) handleRenameThread(w http.ResponseWriter, r *http.Request) {
 	// Capped like every other body this package reads: a title is a line of
 	// text, and one that is not would be buffered here and then shipped with
 	// the list on every load of the rail.
-	if !decodeJSON(w, r, &req) {
+	if !httpx.DecodeJSON(w, r, &req, maxBody) {
 		return
 	}
 	title := strings.TrimSpace(req.Title)
@@ -169,7 +169,7 @@ func (s *Server) handleRenameThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	renamed, err := s.deps.Threads.Rename(r.Context(), u.Subject, id, title)
-	if !actionOutcome(w, renamed, err, "rename thread failed", "no such thread") {
+	if !actionOutcome(w, r, renamed, err, "rename thread failed", "no such thread") {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -181,7 +181,7 @@ func (s *Server) handleDeleteThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	deleted, err := s.deps.Threads.Delete(r.Context(), u.Subject, id)
-	if !actionOutcome(w, deleted, err, "delete thread failed", "no such thread") {
+	if !actionOutcome(w, r, deleted, err, "delete thread failed", "no such thread") {
 		return
 	}
 	// Everything else the thread left behind, and only once the delete has
@@ -228,7 +228,7 @@ func (s *Server) threadTarget(w http.ResponseWriter, r *http.Request) (auth.User
 	// that way by pairing the id with an ownership predicate.
 	id, ok, err := s.deps.Threads.Resolve(r.Context(), r.PathValue("id"))
 	if err != nil {
-		serverError(w, "resolve thread failed", err)
+		serverError(w, r, "resolve thread failed", err)
 		return auth.User{}, 0, false
 	}
 	if !ok {

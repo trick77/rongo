@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -57,8 +56,7 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "bad request")
+	if !httpx.DecodeJSONWith(w, r, &in, 4096, httpx.DecodeOptions{BadRequest: "bad request"}) {
 		return
 	}
 	key := ratelimit.Key(clientIP(r))
@@ -79,11 +77,11 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		serverError(w, "password login failed", err)
+		serverError(w, r, "password login failed", err)
 		return
 	}
 	if err := s.deps.Sessions.Issue(w, claims); err != nil {
-		serverError(w, "issue session", err)
+		serverError(w, r, "issue session", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

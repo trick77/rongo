@@ -32,7 +32,8 @@ func TestAuthURL_sendsTheNamedUsername(t *testing.T) {
 
 func TestBearer_keepsTheTokenOutOfTheURL(t *testing.T) {
 	// Given: a Bitbucket Data Center entry that sends the token as a header,
-	// so no username has to be guessed.
+	// so no username has to be guessed, and no config entries of the shell's.
+	t.Setenv("GIT_CONFIG_COUNT", "")
 	spec := repos.Spec{
 		CloneURL:  "https://bitbucket.example.invalid/scm/shop/backend.git",
 		TokenAuth: "bearer",

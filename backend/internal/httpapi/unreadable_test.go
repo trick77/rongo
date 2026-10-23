@@ -181,9 +181,9 @@ func TestAsk_aReworkWhoseAntecedentCannotBeReadFails(t *testing.T) {
 	})
 }
 
-// TestInternalError_aClosedTabIsNotADatabaseFault: the read failed because the
+// TestServerError_aClosedTabIsNotADatabaseFault: the read failed because the
 // reader left, and the log says so at Warn rather than paging anyone.
-func TestInternalError_aClosedTabIsNotADatabaseFault(t *testing.T) {
+func TestServerError_aClosedTabIsNotADatabaseFault(t *testing.T) {
 	var buf strings.Builder
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
@@ -192,7 +192,7 @@ func TestInternalError_aClosedTabIsNotADatabaseFault(t *testing.T) {
 	cancel()
 	rec := httptest.NewRecorder()
 
-	internalError(ctx, rec, "read thread scope failed", errLocked)
+	serverError(rec, httptest.NewRequest(http.MethodPost, "/", nil).WithContext(ctx), "read thread scope failed", errLocked)
 
 	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), errLocked.Error()) {
 		t.Errorf("status = %d body = %q, want a bare 500", rec.Code, rec.Body.String())
@@ -245,4 +245,112 @@ func TestAsk_memoryUnreadableFailsBeforeTheStream(t *testing.T) {
 			t.Errorf("status = %d body = %q, want a 500 before the stream", rec.Code, rec.Body.String())
 		}
 	})
+}
+
+// failingCall is a store whose one named call fails the way a busy database
+// does; every other call reaches the real store.
+type failingCall struct {
+	*threads.Store
+	fail string
+}
+
+func (f *failingCall) broken(name string) bool { return f.fail == name }
+
+func (f *failingCall) ListPage(ctx context.Context, subject string, opts threads.ListOptions) (threads.ThreadPage, error) {
+	if f.broken("ListPage") {
+		return threads.ThreadPage{}, errLocked
+	}
+	return f.Store.ListPage(ctx, subject, opts)
+}
+
+func (f *failingCall) Search(ctx context.Context, subject, query string, limit int) ([]threads.Hit, error) {
+	if f.broken("Search") {
+		return nil, errLocked
+	}
+	return f.Store.Search(ctx, subject, query, limit)
+}
+
+func (f *failingCall) Resolve(ctx context.Context, publicID string) (int64, bool, error) {
+	if f.broken("Resolve") {
+		return 0, false, errLocked
+	}
+	return f.Store.Resolve(ctx, publicID)
+}
+
+func (f *failingCall) Owns(ctx context.Context, subject string, id int64) (bool, error) {
+	if f.broken("Owns") {
+		return false, errLocked
+	}
+	return f.Store.Owns(ctx, subject, id)
+}
+
+func (f *failingCall) Messages(ctx context.Context, subject string, id int64) ([]threads.Message, error) {
+	if f.broken("Messages") {
+		return nil, errLocked
+	}
+	return f.Store.Messages(ctx, subject, id)
+}
+
+func (f *failingCall) Get(ctx context.Context, subject string, id int64) (threads.Thread, bool, error) {
+	if f.broken("Get") {
+		return threads.Thread{}, false, errLocked
+	}
+	return f.Store.Get(ctx, subject, id)
+}
+
+func (f *failingCall) Share(ctx context.Context, subject string, id int64) (threads.Share, error) {
+	if f.broken("Share") {
+		return threads.Share{}, errLocked
+	}
+	return f.Store.Share(ctx, subject, id)
+}
+
+func (f *failingCall) Shares(ctx context.Context, subject string) ([]threads.Share, error) {
+	if f.broken("Shares") {
+		return nil, errLocked
+	}
+	return f.Store.Shares(ctx, subject)
+}
+
+// lockedMemory is a memory store that cannot be read or written.
+type lockedMemory struct{}
+
+func (lockedMemory) List(context.Context, string) ([]memory.Row, error) { return nil, errLocked }
+func (lockedMemory) Add(context.Context, string, memory.Directive, int64) (memory.Added, error) {
+	return memory.Added{}, errLocked
+}
+func (lockedMemory) Remove(context.Context, string, int64) (bool, error) { return false, errLocked }
+
+// TestReads_aFailedReadIsABare500: whichever read a route cannot do, the
+// reader gets a 500 that says nothing about the database.
+func TestReads_aFailedReadIsABare500(t *testing.T) {
+	// Given an answered thread of this reader's
+	deps, st, _ := testDeps(t)
+	th, _ := answerTurn(t, st, testSubject, "How does routing decide?", "It is a ladder.")
+	deps.Memory = lockedMemory{}
+	thread := "/api/threads/" + th.PublicID
+
+	for _, c := range []struct{ fail, method, path string }{
+		{"ListPage", http.MethodGet, "/api/threads"},
+		{"Search", http.MethodGet, "/api/threads/search?q=ladder"},
+		{"Resolve", http.MethodGet, thread},
+		{"Owns", http.MethodGet, thread},
+		{"Messages", http.MethodGet, thread},
+		{"Get", http.MethodGet, thread + "/summary"},
+		{"Share", http.MethodPost, thread + "/share"},
+		{"Shares", http.MethodGet, "/api/shares"},
+		{"memory", http.MethodGet, "/api/memory"},
+		{"memory", http.MethodDelete, "/api/memory/1"},
+	} {
+		t.Run(c.fail+" "+c.method+" "+c.path, func(t *testing.T) {
+			// When the one call fails
+			deps.Threads = &failingCall{Store: st, fail: c.fail}
+			rec := act(NewServer(deps), c.method, c.path, "")
+
+			// Then the answer is a 500 without the database's text
+			if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), errLocked.Error()) {
+				t.Errorf("got %d %q, want a bare 500", rec.Code, rec.Body.String())
+			}
+		})
+	}
 }

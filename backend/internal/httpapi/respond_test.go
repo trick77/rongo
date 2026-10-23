@@ -12,32 +12,6 @@ import (
 	"github.com/trick77/rongo/internal/threads"
 )
 
-func TestDecodeJSON_malformedBodyIs400(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"title":`))
-	var v struct{ Title string }
-
-	if decodeJSON(rec, req, &v) {
-		t.Fatal("decodeJSON = true on a malformed body")
-	}
-	if rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != `{"error":"malformed request"}` {
-		t.Errorf("got %d %q, want 400 malformed request", rec.Code, rec.Body.String())
-	}
-}
-
-func TestDecodeJSON_fillsTheValueAndWritesNothing(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"title":"x"}`))
-	var v struct{ Title string }
-
-	if !decodeJSON(rec, req, &v) || v.Title != "x" {
-		t.Fatalf("decodeJSON = false or v = %+v", v)
-	}
-	if rec.Body.Len() != 0 {
-		t.Errorf("wrote %q on a good body", rec.Body.String())
-	}
-}
-
 func TestReader_noThreadsIs503(t *testing.T) {
 	s := &Server{}
 	rec := httptest.NewRecorder()
@@ -92,7 +66,7 @@ func TestActionOutcome(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			ok := actionOutcome(rec, c.found, c.err, "revoke share failed", "no such share")
+			ok := actionOutcome(rec, httptest.NewRequest(http.MethodPost, "/", nil), c.found, c.err, "revoke share failed", "no such share")
 			if ok != c.wantOK || rec.Code != c.status || strings.TrimSpace(rec.Body.String()) != c.body {
 				t.Errorf("got %v %d %q, want %v %d %q", ok, rec.Code, rec.Body.String(), c.wantOK, c.status, c.body)
 			}

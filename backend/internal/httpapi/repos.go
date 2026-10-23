@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -96,7 +97,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.deps.Repos.RepoStatus(r.Context())
 	if err != nil {
-		serverError(w, "repository status failed", err)
+		serverError(w, r, "repository status failed", err)
 		return
 	}
 
@@ -136,14 +137,9 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 			"reindex_queued":   st.ReindexQueued,
 		})
 	}
-	// no-store, because this is a STATUS page and a cached status page lies.
-	// The endpoint carried no cache directives at all, so a browser was free to
-	// serve its own copy heuristically — and it did: after an operator fixed
-	// repos.yaml and restarted, the page went on drawing the previous
-	// configuration's `uses` arrows, which reads as rongo ignoring the file
-	// rather than as the browser ignoring the server. Everything here changes
-	// on a restart or a poll, so none of it is worth caching for any interval.
-	w.Header().Set("Cache-Control", "no-store")
+	// writeJSON sends no-store, which this STATUS page depends on: a cached
+	// status page lies (after a repos.yaml fix and a restart, the browser went
+	// on drawing the previous configuration's `uses` arrows).
 	writeJSON(w, out)
 }
 
@@ -169,7 +165,7 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 	if name := r.PathValue("name"); name != "" {
 		found, err := s.deps.Reindex.RequestReindex(r.Context(), name)
 		if err != nil {
-			serverError(w, "re-index request failed", err, "repo", name)
+			serverError(w, r, "re-index request failed", fmt.Errorf("repo %s: %w", name, err))
 			return
 		}
 		if !found {
@@ -182,7 +178,7 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 	} else {
 		n, err := s.deps.Reindex.RequestReindexAll(r.Context())
 		if err != nil {
-			serverError(w, "re-index request failed", err)
+			serverError(w, r, "re-index request failed", err)
 			return
 		}
 		queued = n

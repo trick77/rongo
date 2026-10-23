@@ -216,15 +216,19 @@ func TestAuthLogout_proxyModeHandsOffToTheProxy(t *testing.T) {
 	}
 }
 
-// An abandoned request is no failed login and no panic: the handler returns.
-func TestAuthLogout_withoutSessionsIsStillAnAnswer(t *testing.T) {
+// An abandoned request is not let through to the logout: it gets the 500 any
+// failed admit gets, never an empty 200.
+func TestAuthLogout_anAbandonedRequestIsTheAdmit500(t *testing.T) {
 	srv := NewServer(Deps{Auth: devAuth(t)})
 	gone, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	rec := do(srv, httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil).WithContext(gone))
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rec.Code)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "redirect_url") {
+		t.Errorf("body = %s: the logout ran for a request with no user", rec.Body.String())
 	}
 }

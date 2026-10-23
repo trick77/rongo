@@ -1,56 +1,68 @@
 package httpapi
 
 import (
-	"encoding/json"
-	"fmt"
+	"context"
+	"errors"
+	"log/slog"
 	"net/http"
-	"sync"
+
+	"github.com/trick77/ship/kit/sse"
 )
 
-// sseStream is the answer's wire: one server-sent-events response, written
-// from the handler and — for the title — from a goroutine outside it. The
-// writer is taken under a lock and the stream is shut to further writes the
-// moment the handler returns: a write to a ResponseWriter whose handler has
-// finished is not merely ignored, it races the server's own cleanup.
+// sseStream is the answer's wire: kit's sse.Writer, written from the handler
+// and — for the title — from a goroutine outside it. The Writer serializes
+// those writes and refuses every one after close: a write to a ResponseWriter
+// whose handler has finished is not merely ignored, it races the server's own
+// cleanup.
 type sseStream struct {
-	w      http.ResponseWriter
-	rc     *http.ResponseController
-	mu     sync.Mutex
-	closed bool
+	w *sse.Writer
 }
 
 // openStream writes the headers and the status. Once anything is written the
 // status code is fixed, so every failure after this point is an SSE error
-// event, not a 500 the browser could still act on.
-func openStream(w http.ResponseWriter) *sseStream {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	return &sseStream{w: w, rc: http.NewResponseController(w)}
+// event, not a 500 the browser could still act on. A stream that fails to
+// open reports false and the caller returns before the turn is recorded or
+// paid for: there is nobody to send its events to. Behind kit's middleware
+// the writer always claims to flush, so a failure is the first flush, after
+// the 200, and there is no status left to answer with.
+func openStream(w http.ResponseWriter, r *http.Request) (*sseStream, bool) {
+	sw, err := sse.Open(w)
+	if err != nil {
+		slog.WarnContext(r.Context(), "open event stream failed", "err", err)
+		return nil, false
+	}
+	return &sseStream{w: sw}, true
 }
 
-// send writes one event. A payload that cannot be marshalled is dropped;
-// a stream already closed swallows the write.
+// send writes one event. A payload that cannot be marshalled is dropped; a
+// failed write closes the stream, and a closed one swallows the write.
 func (s *sseStream) send(event string, payload any) {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return
-	}
-	_, _ = fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", event, body)
-	_ = s.rc.Flush()
+	_ = s.w.SendJSON(event, payload)
+}
+
+// errStreamGone is why a turn was cancelled when its stream closed under it: a
+// write failed or ran past kit's write timeout, which is a reader who left
+// without the request being cancelled (a proxy holding the connection open).
+// turnStopped logs it at warn, like any other cancel.
+var errStreamGone = errors.New("event stream closed")
+
+// cancelOnClose stops the turn when the stream closes before it ends: with
+// nobody left to read the answer, the model calls behind it are paid for
+// nothing. The goroutine ends with the turn's context. The handler's own
+// deferred close fires it too, once there is nothing left to stop.
+func (s *sseStream) cancelOnClose(ctx context.Context, cancel context.CancelCauseFunc) {
+	go func() {
+		select {
+		case <-s.w.Done():
+			cancel(errStreamGone)
+		case <-ctx.Done():
+		}
+	}()
 }
 
 // close shuts the stream to further writes. Deferred by the handler, so it
 // runs when the handler returns — after the deferred title wait, which is
 // registered later and so runs first.
 func (s *sseStream) close() {
-	s.mu.Lock()
-	s.closed = true
-	s.mu.Unlock()
+	s.w.Close()
 }

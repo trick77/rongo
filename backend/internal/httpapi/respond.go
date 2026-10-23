@@ -2,8 +2,7 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
-	"log/slog"
+	"fmt"
 	"net/http"
 
 	"github.com/trick77/rongo/internal/auth"
@@ -20,12 +19,12 @@ func writeJSONStatus(w http.ResponseWriter, status int, v any) {
 	httpx.WriteJSON(w, status, v)
 }
 
-// serverError logs the cause and answers 500 with a body that says nothing
-// about it. Not internalError (ask.go): that one reads the request context to
-// log a cancelled turn at Warn, and these handlers have no turn to cancel.
-func serverError(w http.ResponseWriter, msg string, err error, attrs ...any) {
-	slog.Error(msg, append([]any{"err", err}, attrs...)...)
-	httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
+// serverError answers 500 through kit's ServerError: msg prefixes the cause in
+// the log, the body says nothing about it. A cancelled request (the reader
+// left, the thread was deleted) logs at Warn, a deadline at Error; a handler
+// that derived its own context (a turn) passes it in r.
+func serverError(w http.ResponseWriter, r *http.Request, msg string, err error) {
+	httpx.ServerError(w, r, fmt.Errorf("%s: %w", msg, err), "internal server error")
 }
 
 // requireUser is the signed-in reader, or a 401 already written. requireAuth
@@ -49,24 +48,18 @@ func (s *Server) reader(w http.ResponseWriter, r *http.Request) (auth.User, bool
 	return requireUser(w, r)
 }
 
-// decodeJSON reads a request body into v, or answers 400. Every body this
-// package reads is capped at a megabyte: the largest is a question with its
-// pasted texts, and the rest are a line of text or a verdict.
-func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(v); err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "malformed request")
-		return false
-	}
-	return true
-}
+// maxBody caps every JSON body this package reads at a megabyte: the largest
+// is a question with its pasted texts, and the rest are a line of text or a
+// verdict.
+const maxBody = 1 << 20
 
 // actionOutcome answers for a store call that reports whether it found a row:
 // an error is a 500 logged under logMsg, no row is a 404 with notFoundMsg, and
 // a row is the caller's to finish. A thread that is not this reader's and one
 // that is gone are the same "no row", so the 404 never tells them apart.
-func actionOutcome(w http.ResponseWriter, found bool, err error, logMsg, notFoundMsg string) bool {
+func actionOutcome(w http.ResponseWriter, r *http.Request, found bool, err error, logMsg, notFoundMsg string) bool {
 	if err != nil {
-		serverError(w, logMsg, err)
+		serverError(w, r, logMsg, err)
 		return false
 	}
 	if !found {
@@ -87,7 +80,7 @@ func (s *Server) threadAction(w http.ResponseWriter, r *http.Request, logMsg, no
 		return
 	}
 	found, err := fn(r.Context(), u.Subject, id)
-	if !actionOutcome(w, found, err, logMsg, notFoundMsg) {
+	if !actionOutcome(w, r, found, err, logMsg, notFoundMsg) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

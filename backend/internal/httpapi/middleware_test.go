@@ -175,6 +175,26 @@ func TestChain_refusesACrossSitePostAndSetsTheHeaders(t *testing.T) {
 	}
 }
 
+// Only the token routes are marked noindex: the owner's list of their shares
+// shares the prefix minus the slash and is an ordinary page of the app.
+func TestChain_marksOnlyThePublicShareAPINoindex(t *testing.T) {
+	handler := chain(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+
+	for path, want := range map[string]bool{
+		"/api/shares/tok":        true,
+		"/api/shares/tok/source": true,
+		"/api/shares/":           false,
+		"/api/shares":            false,
+		"/api/threads":           false,
+	} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := rec.Header().Get("X-Robots-Tag"); (got == "noindex, nofollow") != want {
+			t.Errorf("%s: X-Robots-Tag = %q, noindex want %v", path, got, want)
+		}
+	}
+}
+
 // Behind the proxy the client is the forwarded address; reached directly on
 // loopback the header is the caller's to forge, so the peer counts.
 func TestClientIP_trustsTheProxyOnlyWhenThereIsOne(t *testing.T) {

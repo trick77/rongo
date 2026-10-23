@@ -84,6 +84,22 @@ func TestFeedback_refusesAVerdictOrReasonOutsideTheSet(t *testing.T) {
 	}
 }
 
+// A body past maxBody is refused as too large, not as malformed, and nothing
+// is stored.
+func TestFeedback_aBodyPastTheCapIs413(t *testing.T) {
+	srv, st := threadActions(t)
+	th := answeredThread(t, st, testSubject)
+
+	body := `{"verdict":1,"reason":"` + strings.Repeat("x", maxBody) + `"}`
+	rec := act(srv, http.MethodPut, feedbackPath(th), body)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413", rec.Code)
+	}
+	if _, found, _ := st.Feedback(context.Background(), testSubject, th.ID); found {
+		t.Error("an oversized verdict was stored")
+	}
+}
+
 // Someone else's thread and no thread at all answer alike, every method.
 func TestFeedback_someoneElsesThreadIsNotFound(t *testing.T) {
 	srv, st := threadActions(t)

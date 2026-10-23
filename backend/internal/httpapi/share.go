@@ -38,18 +38,6 @@ type publicShare struct {
 	CostUSD     *float64          `json:"cost_usd,omitempty"`
 }
 
-// noindex marks a public response as something no crawler and no cache should
-// keep. Set before anything else is written, so it is on the 404 as well: an
-// indexed "not available" page is still a token in somebody's search results.
-//
-// no-store goes with it, as it does on the served shell: the answer to a
-// capability URL is private data, and a shared cache in front that kept it
-// would go on serving a thread after its link was revoked.
-func noindex(w http.ResponseWriter) {
-	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
-	w.Header().Set("Cache-Control", "no-store")
-}
-
 // notFound is the one answer every public lookup gives for a token that is
 // unknown, revoked, or whose thread is gone. Telling those apart would let
 // someone guessing tokens learn which guesses were once real.
@@ -93,7 +81,7 @@ func (s *Server) shareAction(w http.ResponseWriter, r *http.Request,
 		httpx.WriteError(w, http.StatusConflict, "This thread's first answer is still being written.")
 		return
 	default:
-		serverError(w, "share thread failed", err)
+		serverError(w, r, "share thread failed", err)
 		return
 	}
 	writeJSON(w, sh)
@@ -112,7 +100,7 @@ func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.deps.Threads.Shares(r.Context(), u.Subject)
 	if err != nil {
-		serverError(w, "list shares failed", err)
+		serverError(w, r, "list shares failed", err)
 		return
 	}
 	writeJSON(w, list)
@@ -127,7 +115,6 @@ func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
 // to ask them with. Calls and Scope are already `json:"-"` on the message
 // itself.
 func (s *Server) handlePublicShare(w http.ResponseWriter, r *http.Request) {
-	noindex(w)
 	if s.deps.Threads == nil {
 		httpx.WriteError(w, http.StatusServiceUnavailable, "threads unavailable")
 		return
@@ -230,21 +217,20 @@ func (s *Server) handlePublicShareSource(w http.ResponseWriter, r *http.Request)
 	s.serveSource(w, r, repo, path, sha, alwaysCited)
 }
 
-// sharedCited is the public citation routes' gate: noindex, no record is a
-// 503, and the token must cover a turn citing what is asked for, or the
-// answer is the one 404 an unknown token gets. check asks the record with the
-// link's token; its failure is a 500 logged under logMsg.
+// sharedCited is the public citation routes' gate: no record is a 503, and
+// the token must cover a turn citing what is asked for, or the answer is the
+// one 404 an unknown token gets. check asks the record with the link's token;
+// its failure is a 500 logged under logMsg.
 func (s *Server) sharedCited(w http.ResponseWriter, r *http.Request, logMsg string,
 	check func(ctx context.Context, token string) (bool, error)) bool {
 
-	noindex(w)
 	if s.deps.Threads == nil {
 		httpx.WriteError(w, http.StatusServiceUnavailable, "threads unavailable")
 		return false
 	}
 	cited, err := check(r.Context(), r.PathValue("token"))
 	if err != nil {
-		serverError(w, logMsg, err)
+		serverError(w, r, logMsg, err)
 		return false
 	}
 	if !cited {
