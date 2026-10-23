@@ -56,7 +56,7 @@ func mustUser(t *testing.T, r *http.Request) (User, bool) {
 	return u, ok
 }
 
-func TestMiddleware_anAbandonedRequestIsNotAFailedLogin(t *testing.T) {
+func TestMiddleware_anAbandonedRequestIsTheSame500(t *testing.T) {
 	// Given dev mode, and a request whose client went away before the user
 	// row was written
 	svc := newService(t)
@@ -69,12 +69,14 @@ func TestMiddleware_anAbandonedRequestIsNotAFailedLogin(t *testing.T) {
 	rec := httptest.NewRecorder()
 	svc.Middleware(protected(&reached)).ServeHTTP(rec, req)
 
-	// Then nobody is let through, and nothing is reported as a server error
+	// Then nobody is let through, and the answer is the 500 any failed admit
+	// gets (ServerError logs a cancelled request at warn, not as an error),
+	// never an empty 200
 	if reached {
 		t.Error("handler reached for a request with no user")
 	}
-	if rec.Code == http.StatusInternalServerError {
-		t.Error("an abandoned request answered 500, want it dropped quietly")
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
 	}
 }
 
