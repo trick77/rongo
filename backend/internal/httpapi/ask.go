@@ -627,9 +627,21 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// under. Everything before this is validation; the paid work starts below.
 	defer s.turns.add(thread.ID, cancelTurn)()
 
+	// Opened before the question is recorded: a stream that cannot open is
+	// refused, and no turn is recorded or started. Shut when the handler
+	// returns — after the deferred title wait below, which is registered later
+	// and so runs first.
+	st, ok := openStream(w, r)
+	if !ok {
+		return
+	}
+	defer st.close()
+	send := st.send
+
 	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), string(lang), req.Question, headID)
 	if err != nil {
-		serverError(w, r, "record question failed", err)
+		turnStopped(ctx, "record question failed", thread.ID, err)
+		send("error", map[string]any{"message": turnFailed})
 		return
 	}
 	// Render-only, so a failure costs the chip and never the turn: the paste
@@ -642,12 +654,6 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// Read back rather than assumed, so the answer, the notice and the
 	// follow-up pills are written in the language the turn is filed under.
 	lang = ask.ParseLanguage(msg.Language)
-
-	// Shut when the handler returns — after the deferred title wait below,
-	// which is registered later and so runs first.
-	st := openStream(w)
-	defer st.close()
-	send := st.send
 
 	// The language goes out with the thread, because the record may not have
 	// taken the one that was asked for: a thread answers in the language of its
@@ -947,6 +953,15 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Opened before anything is recorded, for the same reason as /api/ask:
+	// a stream that cannot open is refused before the turn is paid for.
+	st, ok := openStream(w, r)
+	if !ok {
+		return
+	}
+	defer st.close()
+	send := st.send
+
 	// The vanished-basis path writes nothing: it is decided before the new
 	// turn is created, so a re-index that removed the evidence never leaves
 	// a message with neither an answer nor an error.
@@ -963,9 +978,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		// A vanished basis is its own message, not the generic turnFailed:
 		// the pipeline never ran, and the truth is that the code the answer
 		// was written from is no longer indexed.
-		st := openStream(w)
-		st.send("error", map[string]any{"message": basisGone})
-		st.close()
+		send("error", map[string]any{"message": basisGone})
 		return
 	}
 
@@ -977,7 +990,8 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// default -1: this row did not resume a clarification.
 	newMsg, err := s.deps.Threads.AddQuestion(ctx, msg.ThreadID, string(audience), string(lang), msg.Question, msg.Head())
 	if err != nil {
-		serverError(w, r, "record re-explain question failed", err)
+		turnStopped(ctx, "record re-explain question failed", msg.ThreadID, err)
+		send("error", map[string]any{"message": turnFailed})
 		return
 	}
 	// The row copies the question, so it copies the fold too.
@@ -987,10 +1001,6 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// The stored language is the thread's, whatever was asked for. Same rule
 	// as /api/ask: the turn is answered in the language it is filed under.
 	lang = ask.ParseLanguage(newMsg.Language)
-
-	st := openStream(w)
-	defer st.close()
-	send := st.send
 
 	// The record is written on a context that outlives the request, the same
 	// as every other write in this package.

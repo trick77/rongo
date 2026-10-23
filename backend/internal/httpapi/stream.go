@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -13,35 +14,38 @@ import (
 // whose handler has finished is not merely ignored, it races the server's own
 // cleanup.
 type sseStream struct {
-	w *sse.Writer // nil when the stream never opened
+	w *sse.Writer
 }
 
 // openStream writes the headers and the status. Once anything is written the
 // status code is fixed, so every failure after this point is an SSE error
 // event, not a 500 the browser could still act on. A stream that fails to
-// open swallows every send, as one whose reader left does: the turn still
-// runs and is recorded.
-func openStream(w http.ResponseWriter) *sseStream {
+// open reports false and the caller returns before the turn is recorded or
+// paid for: there is nobody to send its events to. A writer that cannot
+// flush is refused with a 500, nothing being written yet; behind kit's
+// middleware that shows as a failed first flush instead, after the 200.
+func openStream(w http.ResponseWriter, r *http.Request) (*sseStream, bool) {
 	sw, err := sse.Open(w)
-	if err != nil {
-		slog.Warn("open event stream failed", "err", err)
+	if errors.Is(err, sse.ErrNoFlush) {
+		serverError(w, r, "open event stream failed", err)
+		return nil, false
 	}
-	return &sseStream{w: sw}
+	if err != nil {
+		slog.WarnContext(r.Context(), "open event stream failed", "err", err)
+		return nil, false
+	}
+	return &sseStream{w: sw}, true
 }
 
 // send writes one event. A payload that cannot be marshalled is dropped; a
 // failed write closes the stream, and a closed one swallows the write.
 func (s *sseStream) send(event string, payload any) {
-	if s.w != nil {
-		_ = s.w.SendJSON(event, payload)
-	}
+	_ = s.w.SendJSON(event, payload)
 }
 
 // close shuts the stream to further writes. Deferred by the handler, so it
 // runs when the handler returns — after the deferred title wait, which is
 // registered later and so runs first.
 func (s *sseStream) close() {
-	if s.w != nil {
-		s.w.Close()
-	}
+	s.w.Close()
 }
