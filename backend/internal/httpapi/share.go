@@ -39,14 +39,12 @@ type publicShare struct {
 }
 
 // noindex marks a public response as something no crawler and no cache should
-// keep. Set before anything else is written, so it is on the 404 as well: an
-// indexed "not available" page is still a token in somebody's search results.
-//
-// no-store goes with it, as it does on the served shell: the answer to a
+// keep. The X-Robots-Tag comes from the chain (publicSharePath); this adds the
+// no-store that goes with it, as it does on the served shell: the answer to a
 // capability URL is private data, and a shared cache in front that kept it
-// would go on serving a thread after its link was revoked.
+// would go on serving a thread after its link was revoked. Set before anything
+// else is written, so it is on the 404 as well.
 func noindex(w http.ResponseWriter) {
-	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	w.Header().Set("Cache-Control", "no-store")
 }
 

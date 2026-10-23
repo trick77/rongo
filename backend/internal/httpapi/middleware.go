@@ -30,7 +30,7 @@ func chain(h http.Handler) http.Handler {
 	log := slog.Default()
 	return httpx.Chain(h,
 		httpx.AccessLog(log, httpx.AccessLogOptions{ClientIP: clientIP, Path: maskedPath}),
-		httpx.SecurityHeaders(csp),
+		httpx.SecurityHeadersWith(httpx.SecurityOptions{CSP: csp, NoIndex: publicSharePath}),
 		httpx.RecoverWith(log, httpx.RecoverOptions{Path: maskedPath}),
 		httpx.CrossOrigin,
 	)
@@ -48,6 +48,15 @@ func clientIP(r *http.Request) string {
 		}
 	}
 	return httpx.ClientIP(r, trustedHops)
+}
+
+// publicSharePath is the public share API, answered to anyone holding a
+// token: never indexed, the 404 included, since an indexed "not available"
+// page is still a token in somebody's search results. The share page itself
+// (/share/) sets its own, in web.
+func publicSharePath(path string) bool {
+	token, ok := strings.CutPrefix(path, "/api/shares/")
+	return ok && token != ""
 }
 
 func maskedPath(r *http.Request) string {
