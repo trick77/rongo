@@ -2,9 +2,10 @@ import { describe, it, expect, beforeAll } from "vitest";
 import mermaid from "mermaid";
 import ELK from "elkjs/lib/elk.bundled.js";
 import { diagramKind, diagramSource, ownKinds } from "./diagram";
-import { escapeAngles } from "./diagramText";
+import { dropStrayMarks, escapeAngles } from "./diagramText";
 import { fenceRe } from "./markdown";
 import { fits, toIR, type DiagramIR } from "./diagramIR";
+import { mermaidize } from "./diagramExport";
 import { layoutFlow } from "./diagramLayout";
 import { layoutSequence } from "./diagramSequence";
 import { check, checkER, checkSequence } from "./diagramCheck";
@@ -35,8 +36,15 @@ const goldens: Record<string, string> = import.meta.glob(
 );
 
 /** fence returns the tag and body of the one diagram fence in an answer,
- * read as markdown.tsx reads it. */
+ * read as markdown.tsx reads it, with the stray class marks draw() and the
+ * clipboard drop already dropped (dropStrayMarks). The fence as the backend
+ * stored it is checked on its own below. */
 function fence(text: string): { tag: string; body: string } | null {
+  const f = storedFence(text);
+  return f && { tag: f.tag, body: dropStrayMarks(f.body) };
+}
+
+function storedFence(text: string): { tag: string; body: string } | null {
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const open = fenceRe.exec(lines[i]);
@@ -58,13 +66,27 @@ describe("the diagram corpus", () => {
   for (const [path, text] of Object.entries(goldens)) {
     const name = path.slice(path.lastIndexOf("/") + 1);
     it(`draws ${name}`, async () => {
-      const f = fence(text);
-      expect(f, "the backend left no diagram fence").not.toBeNull();
-      const ok = await mermaid.parse(f!.body, { suppressErrors: true });
-      expect(ok, `the renderer refuses:\n${f!.body}`).toBeTruthy();
+      const stored = storedFence(text);
+      expect(stored, "the backend left no diagram fence").not.toBeNull();
+      // The fence as stored parses, or a stray class mark is all that stands
+      // in its way: that is the one repair draw() and the clipboard make, and
+      // anything else refused here is a defect neither of them hides.
+      const f = fence(text)!;
+      if (!(await mermaid.parse(stored!.body, { suppressErrors: true })))
+        expect(f.body, `the renderer refuses:\n${stored!.body}`).not.toBe(
+          stored!.body,
+        );
+      const ok = await mermaid.parse(f.body, { suppressErrors: true });
+      expect(ok, `the renderer refuses:\n${f.body}`).toBeTruthy();
+      // What Copy as Markdown hands another renderer parses too.
+      const copied = storedFence(mermaidize(text))!;
+      expect(
+        await mermaid.parse(copied.body, { suppressErrors: true }),
+        `the copied fence is refused:\n${copied.body}`,
+      ).toBeTruthy();
       // draw() parses the source with its brackets kept as text; one it
       // cannot parse falls back and loses them, which must show here.
-      const escaped = escapeAngles(f!.body);
+      const escaped = escapeAngles(f.body);
       const okEscaped = await mermaid.parse(escaped, { suppressErrors: true });
       expect(
         okEscaped,
@@ -151,6 +173,29 @@ describe("rongo's drawing of the corpus", () => {
         return;
       }
       expect(check(await layoutFlow(ir, new ELK()))).toEqual([]);
+    });
+
+    it(`frames every node ${name} marks :::focus, and no other`, async () => {
+      const src = fence(text)!.body;
+      if (diagramKind(src) !== "flowchart" && diagramKind(src) !== "graph")
+        return;
+      const d = await mermaid.mermaidAPI.getDiagramFromText(escapeAngles(src));
+      const ir = toIR(d.type, d.db);
+      if (ir === null || ir.kind !== "flow") return;
+      // A node marked where it is declared, `c["…"]:::focus`, by its id.
+      const marked = new Set(
+        [
+          ...src.matchAll(
+            /(\w+)\s*(?:\[[^\]]*\]|\{[^}]*\}|\([^)]*\))?:::focus\b/g,
+          ),
+        ].map((m) => m[1]),
+      );
+      expect(
+        ir.nodes
+          .filter((n) => n.focus)
+          .map((n) => n.id)
+          .sort(),
+      ).toEqual([...marked].sort());
     });
   }
 });

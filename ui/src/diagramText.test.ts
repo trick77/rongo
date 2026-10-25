@@ -1,6 +1,6 @@
 import { beforeAll, describe, it, expect } from "vitest";
 import mermaid from "mermaid";
-import { escapeAngles } from "./diagramText";
+import { dropStrayMarks, escapeAngles } from "./diagramText";
 import { toIR, type FlowIR } from "./diagramIR";
 
 beforeAll(() => {
@@ -23,6 +23,30 @@ async function labels(src: string): Promise<string[]> {
 async function parses(src: string): Promise<boolean> {
   return !!(await mermaid.parse(escapeAngles(src), { suppressErrors: true }));
 }
+
+describe("dropStrayMarks", () => {
+  it("drops a line that is a class mark and nothing else, which the renderer refuses", async () => {
+    const src =
+      'flowchart TD\n  a["Load"] --> b["Price"]:::focus\n  b --> c\n:::focus';
+    expect(await parses(src)).toBe(false);
+    const out = dropStrayMarks(src);
+    expect(out).toBe(
+      'flowchart TD\n  a["Load"] --> b["Price"]:::focus\n  b --> c',
+    );
+    expect(await parses(out)).toBe(true);
+  });
+
+  it("leaves a mark on a node, and every other source, as written", () => {
+    const src = "flowchart TD\n  a:::focus --> b\n  classDef focus stroke:red";
+    expect(dropStrayMarks(src)).toBe(src);
+    expect(dropStrayMarks("sequenceDiagram\n  A->>B: :::x")).toBe(
+      "sequenceDiagram\n  A->>B: :::x",
+    );
+    // In a mindmap a mark on the line after a node is that node's class.
+    const mind = "mindmap\n  root\n    Urgent\n    :::urgent";
+    expect(dropStrayMarks(mind)).toBe(mind);
+  });
+});
 
 describe("escapeAngles through the real parse", () => {
   it("keeps type parameters, whatever their case", async () => {

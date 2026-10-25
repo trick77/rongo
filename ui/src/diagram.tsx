@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { useResolved } from "./useResolved";
 import { download, fileName, toMermaid, toSvgFile } from "./diagramExport";
-import { escapeAngles } from "./diagramText";
+import { dropStrayMarks, escapeAngles } from "./diagramText";
 import { diagramKind } from "./diagramKind";
 
 export { diagramKind };
@@ -351,8 +351,11 @@ export function draw(src: string): Promise<Drawn> {
     p = (async (): Promise<Drawn> => {
       try {
         const mermaid = await renderer();
-        const text = escapeAngles(src);
-        if (text !== src) {
+        // A class mark on a line of its own marks nothing and makes the
+        // renderer refuse everything; it goes before anything else is read.
+        const written = dropStrayMarks(src);
+        const text = escapeAngles(written);
+        if (text !== written) {
           try {
             return await drawFrom(mermaid, text);
           } catch (e) {
@@ -370,7 +373,7 @@ export function draw(src: string): Promise<Drawn> {
             );
           }
         }
-        return await drawFrom(mermaid, src);
+        return await drawFrom(mermaid, written);
       } catch (e) {
         drawn.delete(src);
         return { error: e instanceof Error ? e.message : String(e) };

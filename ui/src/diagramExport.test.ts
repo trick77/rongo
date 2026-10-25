@@ -143,6 +143,16 @@ describe("toMermaid", () => {
   });
 });
 
+describe("mermaidize on a stray class mark", () => {
+  it("drops it from a mermaid fence, as the drawing does, and leaves the rest", () => {
+    const text =
+      'Prose.\n\n```mermaid\nflowchart TD\n  a --> b["Price"]:::focus\n:::focus\n```\n\nMore.';
+    expect(mermaidize(text)).toBe(
+      'Prose.\n\n```mermaid\nflowchart TD\n  a --> b["Price"]:::focus\n```\n\nMore.',
+    );
+  });
+});
+
 describe("mermaidize", () => {
   const body = JSON.stringify({
     type: "sequence",

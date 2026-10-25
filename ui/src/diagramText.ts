@@ -180,6 +180,25 @@ function flowchartLine(line: string): string {
 const sequenceWords =
   /^(\s*)(alt|else|opt|loop|par|and|critical|option|break|rect|box|participant|actor|create participant|create actor|note|title)(?=\s|:|$)(.*)$/i;
 
+/** dropStrayMarks removes a line holding a class mark and nothing else,
+ * `:::focus` on its own. The prompt asks for a mark right after a node, and
+ * a model has written one more on a line of its own after the last edge;
+ * the renderer refuses the whole source over it, and the mark marks
+ * nothing, so dropping it costs nothing a reader would see. Never attached
+ * to the node above instead: in the one seen the node above was the last
+ * edge's target, not the node the question was about, and the accent is
+ * only ever the model's own word. A flowchart only: in a mindmap a mark on
+ * the line after a node is how that node takes a class. */
+export function dropStrayMarks(src: string): string {
+  if (!src.includes(":::")) return src;
+  const kind = diagramKind(src);
+  if (kind !== "graph" && !kind.startsWith("flowchart")) return src;
+  return src
+    .split("\n")
+    .filter((l) => !/^\s*:::[A-Za-z][\w-]*\s*;?\s*$/.test(l))
+    .join("\n");
+}
+
 export function escapeAngles(src: string): string {
   if (!/[<>]/.test(src)) return src;
   const kind = diagramKind(src);
