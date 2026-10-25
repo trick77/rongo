@@ -2,7 +2,7 @@
 
 **Status: a prompt line barring angle brackets was measured 2026-10-25 on the
 flow corpus and NOT shipped. The renderer path escapes them instead
-(`escapeAngles`, `ui/src/diagram.tsx`).**
+(`escapeAngles`, `ui/src/diagramText.ts`).**
 
 ## Why
 

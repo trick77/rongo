@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { useResolved } from "./useResolved";
 import { download, fileName, toMermaid, toSvgFile } from "./diagramExport";
+import { escapeAngles } from "./diagramText";
 import DiagramView from "./DiagramView";
 import { DownloadIcon, ExpandIcon } from "./icons";
 
@@ -342,42 +343,13 @@ let seq = 0;
  * network blip); kept, that failure would follow the source for the rest of
  * the session. A refused source is cheap to refuse again.
  *
+ * The source is drawn with its angle brackets kept as text (escapeAngles,
+ * diagramText.ts). Should that ever fail to parse where the source as
+ * written does, the source as written is drawn: keeping a bracket must never
+ * cost a picture that drew without it, and a refusal quotes what the model
+ * wrote, not the escaped text.
+ *
  * Exported for the tests, which mock the renderer and assert on the cache. */
-/** escapeAngles writes every `<` and `>` in a diagram's text as the
- * renderer's entity code, so it reaches the picture as a character. The
- * renderer's sanitiser takes anything in angle brackets for a tag and drops
- * it: a message written `Failed to fetch <url>: <cause>` drew as `Failed to
- * fetch : `, a threshold `retries < 3` lost its tail. Text means a quoted
- * label or edge label, and in a sequence or state diagram whatever follows
- * a line's colon. Arrows (`-->`, `->>`) sit outside both and are never
- * touched, nor is a `<br>`, which the renderer and rongo both read as a
- * line break. Applied on the way to drawing only: the stored fence, and
- * what Copy as Markdown copies, stay as the model wrote them. */
-export function escapeAngles(src: string): string {
-  if (!/[<>]/.test(src)) return src;
-  const esc = (s: string) =>
-    s
-      .split(/(<br\s*\/?>)/i)
-      .map((part, i) =>
-        i % 2 === 1 ? part : part.replace(/</g, "#lt;").replace(/>/g, "#gt;"),
-      )
-      .join("");
-  const afterColon = /^(sequenceDiagram|stateDiagram)/.test(
-    src.trimStart().replace(/^%%.*\n/gm, ""),
-  );
-  return src
-    .split("\n")
-    .map((line) => {
-      let out = line.replace(/"([^"]*)"/g, (_, s: string) => `"${esc(s)}"`);
-      if (afterColon && !line.trimStart().startsWith("%%")) {
-        const at = out.indexOf(":");
-        if (at >= 0) out = out.slice(0, at + 1) + esc(out.slice(at + 1));
-      }
-      return out;
-    })
-    .join("\n");
-}
-
 export function draw(src: string): Promise<Drawn> {
   let p = drawn.get(src);
   if (!p) {
@@ -385,14 +357,14 @@ export function draw(src: string): Promise<Drawn> {
       try {
         const mermaid = await renderer();
         const text = escapeAngles(src);
-        // rongo's drawing first: its own parse is the only one a flowchart
-        // pays for. A source it cannot parse is declined like any other and
-        // meets the renderer's parse below, which says why.
-        const own = await ours(mermaid, text);
-        if (own !== null) return { svg: own, own: true };
-        await mermaid.parse(text);
-        const { svg } = await mermaid.render(`rongo-diagram-${++seq}`, text);
-        return { svg };
+        if (text !== src) {
+          try {
+            return await drawFrom(mermaid, text);
+          } catch {
+            // Drawn below from the source as written.
+          }
+        }
+        return await drawFrom(mermaid, src);
       } catch (e) {
         drawn.delete(src);
         return { error: e instanceof Error ? e.message : String(e) };
@@ -401,6 +373,17 @@ export function draw(src: string): Promise<Drawn> {
     drawn.set(src, p);
   }
   return p;
+}
+
+/** drawFrom is one attempt at a drawing. rongo's own first: its parse is
+ * the only one a flowchart pays for. A source it cannot parse is declined
+ * like any other and meets the renderer's parse, which says why. */
+async function drawFrom(mermaid: Mermaid, text: string): Promise<Drawn> {
+  const own = await ours(mermaid, text);
+  if (own !== null) return { svg: own, own: true };
+  await mermaid.parse(text);
+  const { svg } = await mermaid.render(`rongo-diagram-${++seq}`, text);
+  return { svg };
 }
 
 /** useDrawn is the drawing for a source, null while it is on its way. */
