@@ -331,13 +331,6 @@ body {
   height: auto;
 }
 
-/* rongo's own drawing is read at its natural size in the answer, never
-   scaled into the column; its frame scrolls instead. Only the inline frame:
-   the full view is mounted inside the same card and still fits the sheet. */
-.rongo-diagram-natural svg {
-  max-width: none;
-}
-
 .ui-markdown :where(h1, h2, h3, h4) {
   margin: 1.1rem 0 0.45rem;
   color: var(--color-ink);

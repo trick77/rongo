@@ -1071,9 +1071,7 @@ export default function Ask({
           // isolating the column would trap that overlay under the composer.
           // A flex column so the composer at its end is held at the foot while
           // the thread is short; a stable gutter so the composer keeps its
-          // width when the thread grows a scrollbar. Marked as the pane a wide
-          // diagram measures to break out of the column (diagram.tsx).
-          data-diagram-pane
+          // width when the thread grows a scrollbar.
           className="flex min-h-0 flex-1 flex-col overflow-auto [scrollbar-gutter:stable]"
         >
           {/* ../loom's transcript edges: prose dissolves into the background as

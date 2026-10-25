@@ -1,0 +1,27 @@
+The general wrapper is the workhorse: a failure while building the request, reaching the server, following redirects, reading the body or decoding its text all return as `Failed to fetch <url>: <cause>`, with the original failure kept inside so a caller can test for it [1][2]. The exception is a server that answers with HTTP 400 or worse, which is reported on its own line with the status number and no cause attached [2]. The PDF branch never uses that wrapper — it has its own message [3]. Placeholders below (`<url>`, `<cause>`, `<n>`, `<v>`) stand for the address, the underlying failure, the relevant number and the panic value.
+
+```mermaid
+flowchart LR
+  subgraph f["Failure"]
+    t1["Blank address"]
+    t2["Request or connection failure"]
+    t3["Too many redirects"]
+    t4["HTTP 400 or worse"]
+    t5["Body over cap"]
+    t6["Read or decode failure"]
+    t7["PDF extraction failure"]
+  end
+  subgraph m["Message"]
+    m1["URL is required"]
+    m2["Failed to fetch <url>: <cause>"]
+    m3["Failed to fetch <url> - status code <n>"]
+    m4["Failed to extract PDF <url>: <cause>"]
+  end
+  t1 -->|"before request"| m1
+  t2 -->|"cause wrapped"| m2
+  t3 -->|"hop limit passed"| m2
+  t4 -->|"status reported"| m3
+  t5 -->|"cause is byte count"| m2
+  t6 -->|"cause wrapped"| m2
+  t7 -->|"extractor configured"| m4
+```
