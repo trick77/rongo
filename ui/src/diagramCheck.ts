@@ -112,8 +112,9 @@ export function check(l: FlowLayout): string[] {
  * inside its box, a message's text clear of its own line, no two texts on
  * one another or on a box, a loop's text and a note beside a lifeline
  * clear of every other lifeline (a message's text crossing one is masked
- * by its ground, a loop's is not), every frame wide enough for its title
- * and apart from the next, and nothing past the canvas. */
+ * by its ground, a loop's is not), every frame wide enough for its title,
+ * its dividers clear of the text above them, apart from the next frame,
+ * and nothing past the canvas. */
 export function checkSequence(l: SequenceLayout): string[] {
   const out: string[] = [];
   for (const a of l.actors) {
@@ -152,12 +153,29 @@ export function checkSequence(l: SequenceLayout): string[] {
     });
     if (f.title.x + f.title.w > f.x + f.w)
       out.push(`frame ${i}: title overflows its frame`);
+    // A divider is a line across the frame: clear of the title and of the
+    // divider text above it, which are both drawn on top of it.
+    f.dividers.forEach((d, j) => {
+      const above = [
+        f.title,
+        ...f.dividers.slice(0, j).flatMap((e) => (e.label ? [e.label] : [])),
+      ];
+      if (above.some((r) => d.y < r.y + r.h + 2))
+        out.push(`frame ${i} divider ${j}: runs into the text above it`);
+    });
     for (const g of l.frames.slice(i + 1)) {
       if (overlaps(f, g)) out.push(`frame ${i}: overlaps another frame`);
     }
   });
   l.notes.forEach((n, i) => {
     texts.push({ name: `note ${i}`, r: n });
+    if (n.beside === undefined) return;
+    // A note over lifelines covers them on purpose; one beside a lifeline
+    // must not land on the next.
+    for (const ln of l.lifelines) {
+      if (ln.id !== n.beside && spansLifeline(n, ln))
+        out.push(`note ${i}: crosses ${ln.id}'s lifeline`);
+    }
   });
 
   texts.forEach((t, i) => {

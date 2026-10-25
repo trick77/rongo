@@ -209,13 +209,14 @@ type SequenceDb = {
     from?: string;
     to?: string;
     type?: number;
-    message?: string;
+    // An object on an autonumber record ({ visible, start, step }).
+    message?: unknown;
     placement?: number;
   }[];
   getBoxes(): unknown[];
   getCreatedActors(): Map<string, unknown>;
   getDestroyedActors(): Map<string, unknown>;
-  showSequenceNumbers(): boolean;
+  getDiagramTitle?(): string;
 };
 
 function isSequenceDb(db: unknown): db is SequenceDb {
@@ -227,7 +228,6 @@ function isSequenceDb(db: unknown): db is SequenceDb {
     "getBoxes",
     "getCreatedActors",
     "getDestroyedActors",
-    "showSequenceNumbers",
   ].every((k) => typeof d[k] === "function");
 }
 
@@ -262,17 +262,21 @@ const ends = new Set([11, 14, 16, 21, 29, 31]);
 /** activate and deactivate: a bar on the lifeline, which this does not
  * draw, and nothing else changes. */
 const ignored = new Set([17, 18]);
+/** autonumber: numbering is declined, `autonumber off` is nothing. The
+ * parse sets no flag for it; the record says which. */
+const autonumber = 26;
 const sides = ["left", "right", "over"] as const;
 
 function sequenceIR(db: unknown): SequenceIR | null {
   if (!isSequenceDb(db)) return null;
-  // Groups of participants, participants arriving or leaving mid-way and
-  // numbered messages are pictures this does not draw.
+  // Groups of participants, participants arriving or leaving mid-way and a
+  // title above the picture are things this does not draw; the renderer
+  // does.
   if (
+    (db.getDiagramTitle?.() ?? "") !== "" ||
     db.getBoxes().length > 0 ||
     db.getCreatedActors().size > 0 ||
-    db.getDestroyedActors().size > 0 ||
-    db.showSequenceNumbers()
+    db.getDestroyedActors().size > 0
   )
     return null;
   const actors: SequenceIR["actors"] = [];
@@ -286,7 +290,7 @@ function sequenceIR(db: unknown): SequenceIR | null {
   let open = false;
   for (const m of db.getMessages()) {
     const t = m.type ?? -1;
-    const label = plain(m.message ?? "");
+    const label = plain(typeof m.message === "string" ? m.message : "");
     if (t in arrows) {
       if (!known.has(m.from ?? "") || !known.has(m.to ?? "")) continue;
       const [line, head] = arrows[t];
@@ -315,6 +319,9 @@ function sequenceIR(db: unknown): SequenceIR | null {
       if (!open) return null;
       open = false;
       rows.push({ type: "end" });
+    } else if (t === autonumber) {
+      const on = (m.message as { visible?: unknown } | undefined)?.visible;
+      if (on !== false) return null;
     } else if (!ignored.has(t)) {
       // rect, par_over, and whatever a later renderer adds.
       return null;

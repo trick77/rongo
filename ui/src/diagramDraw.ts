@@ -7,6 +7,7 @@ import type {
   ZoneBox,
 } from "./diagramLayout";
 import {
+  keywordGap,
   notePad,
   type SeqActor,
   type SeqFrame,
@@ -55,6 +56,9 @@ function el(tag: string, attrs: Attrs, body?: string): string {
 /** How far an arrow stops short of the box it points at, so the head
  * touches the frame rather than burying its tip in it. */
 const headGap = 4;
+/** How far a sequence's arrow stops short of its lifeline: the head's tip
+ * overshoots the line's end by about this much at a 1.4 stroke. */
+const tipGap = 1;
 
 const f = (v: number) => +v.toFixed(1);
 
@@ -78,53 +82,73 @@ export function shorten(
 export function drawFlow(l: FlowLayout, pal: Palette, ids: string): string {
   // One head per arrow colour: a marker takes its fill from its own
   // definition, not from the line it ends.
-  const head = (id: string, fill: string) =>
-    el(
-      "marker",
-      {
-        id: `${ids}-${id}`,
-        viewBox: "0 0 10 10",
-        refX: 9,
-        refY: 5,
-        markerWidth: 7,
-        markerHeight: 7,
-        orient: "auto-start-reverse",
-      },
-      el("path", { d: "M0,0 L10,5 L0,10 z", fill }),
-    );
-  const defs = el(
-    "defs",
-    {},
-    head("arrow", pal.muted) + head("warn", pal.warn),
-  );
-  const body = [
-    el("rect", {
-      x: 0.5,
-      y: 0.5,
-      width: l.width - 1,
-      height: l.height - 1,
-      rx: 8,
-      fill: pal.surface,
-      stroke: pal.line,
-      "stroke-width": 1,
-    }),
+  const defs =
+    marker(ids, "arrow", filledHead, { fill: pal.muted }) +
+    marker(ids, "warn", filledHead, { fill: pal.warn });
+  return svg(l.width, l.height, pal, defs, [
     ...l.zones.map((z) => zone(z, pal)),
     ...l.edges.map((e) => edge(e, pal, ids)),
     ...l.edges.map((e) =>
       e.label ? label(e.label, e.warn ? pal.warn : pal.muted, pal) : "",
     ),
     ...l.nodes.map((n) => node(n, pal)),
-  ].join("");
+  ]);
+}
+
+const filledHead = "M0,0 L10,5 L0,10 z";
+
+/** marker is an arrowhead definition, its tip at refX on the line's end. */
+function marker(
+  ids: string,
+  id: string,
+  d: string,
+  paint: Attrs,
+  refX = 9,
+): string {
+  return el(
+    "marker",
+    {
+      id: `${ids}-${id}`,
+      viewBox: "0 0 10 10",
+      refX,
+      refY: 5,
+      markerWidth: 7,
+      markerHeight: 7,
+      orient: "auto-start-reverse",
+    },
+    el("path", { d, ...paint }),
+  );
+}
+
+/** svg is a drawing's root: its own size, its marker definitions, and the
+ * canvas under everything drawn on it. */
+function svg(
+  width: number,
+  height: number,
+  pal: Palette,
+  defs: string,
+  body: string[],
+): string {
+  const canvas = el("rect", {
+    x: 0.5,
+    y: 0.5,
+    width: width - 1,
+    height: height - 1,
+    rx: 8,
+    fill: pal.surface,
+    stroke: pal.line,
+    "stroke-width": 1,
+  });
   return el(
     "svg",
     {
       xmlns: "http://www.w3.org/2000/svg",
-      viewBox: `0 0 ${l.width} ${l.height}`,
-      width: l.width,
-      height: l.height,
+      viewBox: `0 0 ${width} ${height}`,
+      width,
+      height,
       "font-family": pal.sans,
     },
-    defs + body,
+    el("defs", {}, defs) + canvas + body.join(""),
   );
 }
 
@@ -142,39 +166,12 @@ export function drawSequence(
   pal: Palette,
   ids: string,
 ): string {
-  const mark = (id: string, d: string, paint: Attrs, refX = 9) =>
-    el(
-      "marker",
-      {
-        id: `${ids}-${id}`,
-        viewBox: "0 0 10 10",
-        refX,
-        refY: 5,
-        markerWidth: 7,
-        markerHeight: 7,
-        orient: "auto-start-reverse",
-      },
-      el("path", { d, ...paint }),
-    );
   const line = { fill: "none", stroke: pal.muted, "stroke-width": 1.6 };
-  const defs = el(
-    "defs",
-    {},
-    mark("arrow", "M0,0 L10,5 L0,10 z", { fill: pal.muted }) +
-      mark("open", "M1,1 L9,5 L1,9", line) +
-      mark("cross", "M2,2 L8,8 M8,2 L2,8", line, 5),
-  );
-  const body = [
-    el("rect", {
-      x: 0.5,
-      y: 0.5,
-      width: l.width - 1,
-      height: l.height - 1,
-      rx: 8,
-      fill: pal.surface,
-      stroke: pal.line,
-      "stroke-width": 1,
-    }),
+  const defs =
+    marker(ids, "arrow", filledHead, { fill: pal.muted }) +
+    marker(ids, "open", "M1,1 L9,5 L1,9", line) +
+    marker(ids, "cross", "M2,2 L8,8 M8,2 L2,8", line, 5);
+  return svg(l.width, l.height, pal, defs, [
     ...l.frames.map((fr) => frame(fr, pal)),
     ...l.lifelines.map((ln) =>
       el("line", {
@@ -193,21 +190,10 @@ export function drawSequence(
     ...l.frames.map((fr) => frameText(fr, pal)),
     ...l.messages.map((m) =>
       m.label
-        ? block(m.label, m.framed ? pal.tint : pal.surface, m.self, pal)
+        ? block(m.label, m.framed ? pal.tint : pal.surface, m.self, pal.fg, pal)
         : "",
     ),
-  ].join("");
-  return el(
-    "svg",
-    {
-      xmlns: "http://www.w3.org/2000/svg",
-      viewBox: `0 0 ${l.width} ${l.height}`,
-      width: l.width,
-      height: l.height,
-      "font-family": pal.sans,
-    },
-    defs + body,
-  );
+  ]);
 }
 
 function frame(fr: SeqFrame, pal: Palette): string {
@@ -242,7 +228,15 @@ function frame(fr: SeqFrame, pal: Palette): string {
  * patch of the frame's tint: a lifeline runs through the title's corner. */
 function frameText(fr: SeqFrame, pal: Palette): string {
   const t = fr.title;
-  const mono = { "font-family": pal.mono, "font-size": ramp.label };
+  const mono = {
+    "font-family": pal.mono,
+    "font-size": ramp.label,
+    "dominant-baseline": "central",
+  };
+  const lh = t.h / Math.max(1, fr.cond.length);
+  // The condition's lines all start where its first did, beside the
+  // keyword, so a wrapped one reads as one block.
+  const condX = t.x + textWidth(fr.keyword, ramp.label, "mono") + keywordGap;
   const title =
     knockout(t, pal.tint) +
     el(
@@ -250,41 +244,28 @@ function frameText(fr: SeqFrame, pal: Palette): string {
       {
         ...mono,
         x: f(t.x),
-        y: f(t.y + t.h / 2),
+        y: f(t.y + lh / 2),
         fill: pal.fg,
         "font-weight": 600,
-        "dominant-baseline": "central",
       },
-      esc(fr.keyword) +
-        (fr.label === ""
-          ? ""
-          : el(
-              "tspan",
-              {
-                fill: pal.muted,
-                "font-weight": 400,
-                dx: f(textWidth("  ", ramp.label, "mono")),
-              },
-              esc(fr.label),
-            )),
-    );
+      esc(fr.keyword),
+    ) +
+    fr.cond
+      .map((line, i) =>
+        el(
+          "text",
+          {
+            ...mono,
+            x: f(condX),
+            y: f(t.y + i * lh + lh / 2),
+            fill: pal.muted,
+          },
+          esc(line),
+        ),
+      )
+      .join("");
   const conds = fr.dividers
-    .map((d) =>
-      d.label
-        ? knockout(d.label, pal.tint) +
-          el(
-            "text",
-            {
-              ...mono,
-              x: f(d.label.x),
-              y: f(d.label.y + d.label.h / 2),
-              fill: pal.muted,
-              "dominant-baseline": "central",
-            },
-            esc(d.label.lines[0]),
-          )
-        : "",
-    )
+    .map((d) => (d.label ? block(d.label, pal.tint, true, pal.muted, pal) : ""))
     .join("");
   return title + conds;
 }
@@ -368,9 +349,13 @@ function note(n: SeqNote, pal: Palette): string {
 }
 
 function message(m: SeqMessage, pal: Palette, ids: string): string {
+  // A message ends on a lifeline, a hairline, not a box frame: the tip
+  // touches it. Only the filled and open heads reach past their line's
+  // end; a cross is centred on it.
   let pts = m.points;
-  if (m.head !== "none") pts = shorten(pts, false, headGap);
-  if (m.head === "both") pts = shorten(pts, true, headGap);
+  if (m.head === "filled" || m.head === "open" || m.head === "both")
+    pts = shorten(pts, false, tipGap);
+  if (m.head === "both") pts = shorten(pts, true, tipGap);
   const end =
     m.head === "open" ? "open" : m.head === "cross" ? "cross" : "arrow";
   return el("polyline", {
@@ -384,12 +369,13 @@ function message(m: SeqMessage, pal: Palette, ids: string): string {
   });
 }
 
-/** block is a message's text on a patch of its ground: centred over its
- * arrow, or read from the left beside a loop. */
+/** block is a text on a patch of its ground: centred over its arrow, or
+ * read from the left beside a loop or under a divider. */
 function block(
   t: TextBlock,
   ground: string,
   start: boolean,
+  fill: string,
   pal: Palette,
 ): string {
   const lh = t.h / t.lines.length;
@@ -402,7 +388,7 @@ function block(
           {
             x: f(start ? t.x : t.x + t.w / 2),
             y: f(t.y + i * lh + lh / 2),
-            fill: pal.fg,
+            fill,
             "font-family": t.face === "mono" ? pal.mono : undefined,
             "font-size": t.size,
             "text-anchor": start ? "start" : "middle",

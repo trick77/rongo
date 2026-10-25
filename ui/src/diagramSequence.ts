@@ -52,6 +52,8 @@ export type SeqMessage = {
 };
 export type SeqNote = {
   lines: string[];
+  /** The lifeline a note left or right of one sits beside. */
+  beside?: string;
   x: number;
   y: number;
   w: number;
@@ -59,7 +61,8 @@ export type SeqNote = {
 };
 export type SeqFrame = {
   keyword: string;
-  label: string;
+  /** The condition, wrapped; its lines sit beside the keyword. */
+  cond: string[];
   x: number;
   y: number;
   w: number;
@@ -115,25 +118,47 @@ const noteGap = 12;
 const noteReach = 24;
 /** A frame: past its outermost lifeline, its title band, title inset. */
 const framePad = 16;
-const titleBand = 30;
 const titleInset = 12;
+/** Above and below a frame's title, inside the frame. */
+const titlePad = 8;
+/** A frame's condition: one line, and the widest before it wraps. */
+const condLine = 14;
+const condMax = 220;
+/** Least space between a divider and the text above it. */
+const dividerGap = 6;
 
 const up = (v: number) => Math.ceil(v);
 
-function text(label: string, max: number): Omit<TextBlock, "x" | "y"> {
-  const face: Face = looksLikeCode(label) ? "mono" : "sans";
-  const size = face === "mono" ? ramp.code : ramp.text;
-  const lines = wrap(label, max, size, face);
-  const w = up(Math.max(...lines.map((l) => textWidth(l, size, face))));
-  return { lines, face, size, w, h: lines.length * textLine };
+type Style = { face: Face; size: number; lineH: number };
+
+/** A message's text: a name from the code in the mono, else the sans. */
+function messageStyle(label: string): Style {
+  return looksLikeCode(label)
+    ? { face: "mono", size: ramp.code, lineH: textLine }
+    : { face: "sans", size: ramp.text, lineH: textLine };
+}
+const noteStyle: Style = {
+  face: "sans",
+  size: ramp.text,
+  lineH: ramp.lineHeight,
+};
+/** A frame's or a divider's condition: the small mono, as a flow's arrow
+ * label. */
+const condStyle: Style = { face: "mono", size: ramp.label, lineH: condLine };
+
+/** text is a label wrapped at max and measured, not yet placed. */
+function text(
+  label: string,
+  max: number,
+  s: Style,
+): Omit<TextBlock, "x" | "y"> {
+  const lines = wrap(label, max, s.size, s.face);
+  const w = up(Math.max(...lines.map((l) => textWidth(l, s.size, s.face))));
+  return { lines, face: s.face, size: s.size, w, h: lines.length * s.lineH };
 }
 
-/** titleWidth is the room a frame's title takes: the keyword, a space of
- * two characters, the condition. */
-export function titleWidth(keyword: string, label: string): number {
-  const w = textWidth(keyword, ramp.label, "mono");
-  return label === "" ? w : w + textWidth(`  ${label}`, ramp.label, "mono");
-}
+/** The room between a frame's keyword and its condition. */
+export const keywordGap = textWidth("  ", ramp.label, "mono");
 
 type Constraint = { a: number; b: number; need: number };
 
@@ -163,9 +188,9 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
   // ---- what each row needs, before anything is placed ----
   const texts = ir.rows.map((r) =>
     r.type === "message" && r.label !== ""
-      ? text(r.label, textMax)
+      ? text(r.label, textMax, messageStyle(r.label))
       : r.type === "note"
-        ? noteText(r.label)
+        ? text(r.label, noteMax, noteStyle)
         : null,
   );
   const cons: Constraint[] = [];
@@ -209,7 +234,9 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
   const messages: SeqMessage[] = [];
   const notes: SeqNote[] = [];
   const frames: SeqFrame[] = [];
-  type Open = { f: SeqFrame; cols: Set<number>; boxes: Box[] };
+  /** floor: the highest a divider may sit, clear of the title or the
+   * divider text above it when no row came between. */
+  type Open = { f: SeqFrame; cols: Set<number>; boxes: Box[]; floor: number };
   let open: Open | null = null;
   const top = margin + toolsBand + headH;
   let y = top + 24;
@@ -270,7 +297,7 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
     } else if (r.type === "note") {
       const i = col.get(r.from)!;
       const j = col.get(r.to)!;
-      const tw = t ?? noteText("");
+      const tw = t ?? text("", noteMax, noteStyle);
       let w = Math.max(noteMin, tw.w + 2 * notePad);
       const h = tw.lines.length * ramp.lineHeight + 14;
       let x: number;
@@ -282,7 +309,8 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
         if (i !== j) w = Math.max(w, hi - lo + 2 * noteReach);
         x = (lo + hi) / 2 - w / 2;
       }
-      const note = { lines: tw.lines, x, y, w, h };
+      const note: SeqNote = { lines: tw.lines, x, y, w, h };
+      if (r.side !== "over") note.beside = r.from;
       notes.push(note);
       if (open) {
         open.cols.add(i).add(j);
@@ -290,36 +318,47 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
       }
       y += h + rowGap;
     } else if (r.type === "frame") {
+      // The keyword, then the condition wrapped beside it: a long
+      // condition left whole widened the frame, and with it the canvas
+      // every other label is scaled down in.
+      const kw = up(textWidth(r.keyword, ramp.label, "mono"));
+      const cond =
+        r.label === "" ? [] : text(r.label, condMax, condStyle).lines;
+      const condW = Math.max(
+        0,
+        ...cond.map((l) => textWidth(l, ramp.label, "mono")),
+      );
+      const h = Math.max(1, cond.length) * condLine;
       const f: SeqFrame = {
         keyword: r.keyword,
-        label: r.label,
+        cond,
         x: 0,
         y,
         w: 0,
         h: 0,
-        title: { x: 0, y: y + 8, w: up(titleWidth(r.keyword, r.label)), h: 14 },
+        title: {
+          x: 0,
+          y: y + titlePad,
+          w: up(cond.length > 0 ? kw + keywordGap + condW : kw),
+          h,
+        },
         dividers: [],
       };
       frames.push(f);
-      open = { f, cols: new Set(), boxes: [] };
-      y += titleBand;
+      const floor = f.title.y + h + dividerGap;
+      open = { f, cols: new Set(), boxes: [], floor };
+      y += 2 * titlePad + h;
     } else if (r.type === "divider" && open) {
-      const lineY = y - rowGap / 2;
+      const lineY = Math.max(y - rowGap / 2, open.floor);
       if (r.label !== "") {
-        const lt = {
-          lines: [r.label],
-          face: "mono" as Face,
-          size: ramp.label,
-          w: up(textWidth(r.label, ramp.label, "mono")),
-          h: 14,
-        };
-        open.f.dividers.push({
-          y: lineY,
-          label: { ...lt, x: 0, y: lineY + 6 },
-        });
-        y = lineY + 6 + lt.h + 12;
+        const lt = text(r.label, condMax, condStyle);
+        const label = { ...lt, x: 0, y: lineY + dividerGap };
+        open.f.dividers.push({ y: lineY, label });
+        open.floor = label.y + lt.h + dividerGap;
+        y = label.y + lt.h + 12;
       } else {
         open.f.dividers.push({ y: lineY });
+        open.floor = lineY + dividerGap;
         y = lineY + 12;
       }
     } else if (r.type === "end" && open) {
@@ -407,18 +446,6 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
 }
 
 type Box = { x: number; y: number; w: number; h: number };
-
-function noteText(label: string): Omit<TextBlock, "x" | "y"> {
-  const lines = wrap(label, noteMax, ramp.text, "sans");
-  const w = up(Math.max(...lines.map((l) => textWidth(l, ramp.text, "sans"))));
-  return {
-    lines,
-    face: "sans",
-    size: ramp.text,
-    w,
-    h: lines.length * ramp.lineHeight,
-  };
-}
 
 /** columns is each lifeline's x, the first at 0. Every constraint says two
  * lifelines stand at least so far apart; the narrowest are met first, and a

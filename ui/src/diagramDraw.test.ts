@@ -285,13 +285,33 @@ describe("drawSequence", () => {
 
   it("titles a frame with its keyword, then its condition in the muted", () => {
     const doc = parse(drawSequence(seqLayout(), pal, "s"));
-    const title = [...doc.querySelectorAll("text")].find((t) =>
-      t.textContent?.startsWith("alt"),
-    )!;
-    expect(title.getAttribute("font-weight")).toBe("600");
-    const cond = title.querySelector("tspan")!;
-    expect(cond.textContent).toBe("nothing delivered");
+    const texts = [...doc.querySelectorAll("text")];
+    const kw = texts.find((t) => t.textContent === "alt")!;
+    expect(kw.getAttribute("font-weight")).toBe("600");
+    expect(kw.getAttribute("fill")).toBe(pal.fg);
+    const cond = texts.find((t) => t.textContent === "nothing delivered")!;
     expect(cond.getAttribute("fill")).toBe(pal.muted);
+    expect(Number(cond.getAttribute("x"))).toBeGreaterThan(
+      Number(kw.getAttribute("x")),
+    );
+    expect(cond.getAttribute("y")).toBe(kw.getAttribute("y"));
+  });
+
+  it("ends a head on its lifeline, a cross centred on it", () => {
+    const l = seqLayout();
+    const doc = parse(drawSequence(l, pal, "s"));
+    const end = (i: number) =>
+      Number(
+        doc
+          .querySelectorAll("polyline")
+          [i].getAttribute("points")!
+          .split(" ")
+          .at(-1)!
+          .split(",")[0],
+      );
+    const b = l.lifelines.find((x) => x.id === "b")!.x;
+    expect(end(2)).toBe(b - 1);
+    expect(end(3)).toBe(b);
   });
 });
 

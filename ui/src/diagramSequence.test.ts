@@ -184,6 +184,42 @@ describe("layoutSequence", () => {
     expect(checkSequence(l)).toEqual([]);
   });
 
+  it("wraps a long condition beside its keyword rather than widening the canvas", () => {
+    const long =
+      "the payment was declined by the provider after three retries were exhausted";
+    const l = layoutSequence(
+      seq(actors("a", "b"), [
+        { type: "frame", keyword: "alt", label: long },
+        msg("a", "b", "x"),
+        { type: "divider", keyword: "else", label: long },
+        msg("a", "b", "y"),
+        { type: "end" },
+      ]),
+    );
+    const f = l.frames[0];
+    expect(f.cond.length).toBeGreaterThan(1);
+    expect(f.dividers[0].label!.lines.length).toBeGreaterThan(1);
+    expect(l.width).toBeLessThan(360);
+    expect(checkSequence(l)).toEqual([]);
+  });
+
+  it("keeps a divider clear of the title when no row comes between", () => {
+    const l = layoutSequence(
+      seq(actors("a", "b"), [
+        { type: "frame", keyword: "alt", label: "cached" },
+        { type: "divider", keyword: "else", label: "fresh" },
+        { type: "divider", keyword: "else", label: "" },
+        msg("a", "b", "x"),
+        { type: "end" },
+      ]),
+    );
+    const f = l.frames[0];
+    expect(f.dividers[0].y).toBeGreaterThan(f.title.y + f.title.h);
+    const first = f.dividers[0].label!;
+    expect(f.dividers[1].y).toBeGreaterThan(first.y + first.h);
+    expect(checkSequence(l)).toEqual([]);
+  });
+
   it("runs every lifeline from its box to below the last row", () => {
     const l = layoutSequence(
       seq(actors("a", "b"), [msg("a", "b", "x"), msg("b", "a", "y")]),
@@ -225,6 +261,22 @@ describe("checkSequence", () => {
     const out = checkSequence(l);
     expect(out.some((s) => s.includes("labels overlap"))).toBe(true);
     expect(out.some((s) => s.includes("overflows its box"))).toBe(true);
+  });
+
+  it("says when a note beside a lifeline lands on the next, or a divider on the title", () => {
+    const l = layoutSequence(
+      seq(actors("a", "b"), [
+        { type: "frame", keyword: "alt", label: "x" },
+        { type: "note", from: "a", to: "a", side: "right", label: "beside" },
+        { type: "divider", keyword: "else", label: "" },
+        { type: "end" },
+      ]),
+    );
+    l.notes[0].w = lifeline(l, "b") - l.notes[0].x + 20;
+    l.frames[0].dividers[0].y = l.frames[0].title.y + 4;
+    const out = checkSequence(l);
+    expect(out.some((s) => s.includes("crosses b's lifeline"))).toBe(true);
+    expect(out.some((s) => s.includes("runs into the text above"))).toBe(true);
   });
 
   it("says when a self message's text crosses a lifeline", () => {

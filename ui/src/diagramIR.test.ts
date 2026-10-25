@@ -279,6 +279,13 @@ describe("toIR for a sequence", () => {
     expect(s.rows.map((r) => r.type)).toEqual(["message", "message"]);
   });
 
+  it("draws a sequence whose numbering is switched off", async () => {
+    const s = await sequence(`sequenceDiagram
+  autonumber off
+  A->>B: x`);
+    expect(s.rows.map((r) => r.type)).toEqual(["message"]);
+  });
+
   it("declines a frame inside a frame", async () => {
     expect(
       await ir(`sequenceDiagram
@@ -297,6 +304,7 @@ describe("toIR for a sequence", () => {
       "box Aqua Group\n  participant A\n  end\n  A->>B: x",
       "A->>B: x\n  create participant C\n  B->>C: hi",
       "par_over both\n  A->>B: x\n  end",
+      "title Checkout\n  A->>B: x",
     ];
     for (const body of declined) {
       expect(await ir(`sequenceDiagram\n  ${body}`), body).toBeNull();
