@@ -62,6 +62,44 @@ describe("escapeAngles through the real parse", () => {
   });
 });
 
+describe("escapeAngles on what the last review found", () => {
+  it("keeps a line break in any case, and reads a comparison as text", async () => {
+    expect(
+      await labels(
+        "flowchart LR\n  a[x <BR> y] --> b[p <Br/> q] --> c[if a<b and c>d]",
+      ),
+    ).toEqual(["x\ny", "p\nq", "if a<b and c>d"]);
+  });
+
+  it("reads a participant named Title as a sender, not a keyword", async () => {
+    const src = "sequenceDiagram\n  Title->>A: ok <x>";
+    expect(escapeAngles(src)).toBe(
+      "sequenceDiagram\n  Title->>A: ok #lt;x#gt;",
+    );
+    expect(await parses(src)).toBe(true);
+  });
+
+  it("keeps a label written into an arrow, spaced or not, with any head", async () => {
+    expect(
+      await labels(
+        "flowchart LR\n  a -- x <y> --x b\n  b --text <z>--> c\n  c -- n > 0 --o d",
+      ),
+    ).toEqual(["a", "b", "c", "d", "x <y>", "text <z>", "n > 0"]);
+  });
+
+  it("keeps an asymmetric node's label and a class body's members", async () => {
+    expect(await labels("flowchart LR\n  a>Flag <f>] --> b")).toEqual([
+      "Flag <f>",
+      "b",
+    ]);
+    const cls = "classDiagram\n  class Repo{\n    +List<Item> items\n  }";
+    expect(escapeAngles(cls)).toBe(
+      "classDiagram\n  class Repo{\n    +List#lt;Item#gt; items\n  }",
+    );
+    expect(await parses(cls)).toBe(true);
+  });
+});
+
 describe("escapeAngles on the variants and shorthands", () => {
   it("leaves a :::class shorthand and its arrow alone", () => {
     expect(

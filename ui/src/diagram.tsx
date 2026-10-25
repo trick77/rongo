@@ -349,9 +349,14 @@ export function draw(src: string): Promise<Drawn> {
           try {
             return await drawFrom(mermaid, text);
           } catch (e) {
-            // A form escapeAngles does not know yet, drawn below from the
-            // source as written with its brackets lost as before. Said, so
-            // the gap shows.
+            // Only a refusal of the escaped text falls back. Anything else (a
+            // chunk gone after a redeploy, a blip) is no reason to cache a
+            // picture without its brackets for the session; it fails this
+            // attempt like any other, and the next one tries again.
+            if (await mermaid.parse(text, { suppressErrors: true })) throw e;
+            // A form escapeAngles escapes into something the renderer
+            // refuses: drawn below as written, its brackets lost as before.
+            // Said, so the gap shows.
             console.warn(
               "diagram: escaped source refused, drawn as written",
               e,

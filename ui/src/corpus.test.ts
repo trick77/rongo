@@ -101,7 +101,12 @@ describe("rongo's drawing of the corpus", () => {
       // Every bracket the escape turned into text reaches a drawn label, and
       // nothing of the escaping is left in one.
       const escaped = escapeAngles(src);
-      const kept = (escaped.match(/#lt;|#gt;/g) ?? []).length;
+      // Tooltips, links and styles are escaped too but never drawn as a label.
+      const labelled = escaped
+        .split("\n")
+        .filter((l) => !/^\s*(click|classDef|class|style|linkStyle)\b/.test(l))
+        .join("\n");
+      const kept = (labelled.match(/#lt;|#gt;/g) ?? []).length;
       const d = await mermaid.mermaidAPI.getDiagramFromText(escaped);
       const ir = toIR(d.type, d.db);
       if (ir === null) return;

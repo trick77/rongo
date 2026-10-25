@@ -12,35 +12,47 @@ import { diagramKind } from "./diagramKind";
  * into the character.
  *
  * "The text" is found by grammar, not by a parser: quoted strings, and per
- * kind the unquoted forms the model writes. A flowchart's node labels,
- * `|edge labels|`, `-- edge labels -->` and subgraph titles; what follows a
- * sequence line's keyword or a message's colon; a state, class or entity
- * line's text after its colon, and a state note's body. Arrows (`-->`,
- * `->>`), `:::class` shorthands and the formatting tags the renderer honours
- * (`<br>`, `<b>`, `<code>` ..., lowercase and exact) are never touched. A form
- * this does not know is left as it was: draw() falls back to the source as
- * written, and says so, whenever the escaped one fails to parse.
+ * kind the unquoted forms the model writes. A flowchart's node labels in
+ * their shapes, `|edge labels|`, `-- edge labels -->` in their arrow forms
+ * and subgraph titles; what follows a sequence line's keyword or a message's
+ * colon; a state, class or entity line's text after its colon, a state
+ * note's body and a class body's members. Arrows (`-->`, `->>`), `:::class`
+ * shorthands and the formatting tags the renderer honours (`<br>` in any
+ * case, `<b>`, `<code>` ... exact and lowercase, `<span ...>`) are never
+ * touched.
+ *
+ * Two ways a form can still be missed. One this escapes into something the
+ * renderer refuses: draw() then draws the source as written and warns. One
+ * this does not recognise at all: it parses as written and its brackets are
+ * dropped as they always were, silently; a new form seen in an answer goes
+ * into the diagram corpus first.
  *
  * Applied on the way to drawing only; the stored fence and what Copy as
  * Markdown copies stay as the model wrote them.
  */
 
-/** A formatting tag the renderer honours, kept as markup: lowercase, the
- * name alone or followed by attributes after a space. `<S>`, `<I, V>`,
- * `<Code>` are type parameters, not tags. */
-const markup =
-  /^<\/?(?:br|b|i|u|em|strong|code|sub|sup|small|s|del|ins|mark|span)(?:\s[^<>]*)?\/?>/;
+/** A formatting tag the renderer honours, kept as markup. A line break in
+ * any case, as the renderer and plain() both read it; the inline tags only
+ * exact and lowercase, so `<S>`, `<I, V>`, `<Code>` and `<b and c>` are text;
+ * attributes only on a span. */
+const markup = [
+  /^<\/?br\s*\/?>/i,
+  /^<\/?(?:b|i|u|em|strong|code|sub|sup|small|s|del|ins|mark)>/,
+  /^<\/?span(?:\s[^<>]*)?>/,
+];
 
-/** esc writes the brackets of one piece of text as entity codes, leaving the
- * formatting tags in it alone. */
-export function esc(s: string): string {
+/** entityAngles writes the brackets of one piece of text as the renderer's
+ * entity codes, leaving the formatting tags in it alone. (Not diagramDraw's
+ * XML escape: this one is for the source on its way to the parser.) */
+function entityAngles(s: string): string {
   let out = "";
   for (let i = 0; i < s.length;) {
     if (s[i] === "<") {
-      const m = markup.exec(s.slice(i));
-      if (m) {
-        out += m[0];
-        i += m[0].length;
+      const rest = s.slice(i);
+      const tag = markup.map((r) => r.exec(rest)).find((m) => m !== null);
+      if (tag) {
+        out += tag[0];
+        i += tag[0].length;
         continue;
       }
       out += "#lt;";
@@ -56,7 +68,7 @@ export function esc(s: string): string {
 
 /** quotedIn escapes every double-quoted string of one piece of source. */
 function quotedIn(src: string): string {
-  return src.replace(/"([^"]*)"/g, (_, s: string) => `"${esc(s)}"`);
+  return src.replace(/"([^"]*)"/g, (_, s: string) => `"${entityAngles(s)}"`);
 }
 
 /** quotedAcross escapes the double-quoted strings of a flowchart, whose
@@ -75,23 +87,29 @@ function quotedAcross(src: string): string {
     if (open < 0) break;
     const close = joined.indexOf('"', open + 1);
     if (close < 0) break;
-    out += joined.slice(i, open + 1) + esc(joined.slice(open + 1, close)) + '"';
+    out +=
+      joined.slice(i, open + 1) +
+      entityAngles(joined.slice(open + 1, close)) +
+      '"';
     i = close + 1;
   }
   const done = (out + joined.slice(i)).split("\n");
   return done.map((l, k) => (code[k] === "" ? lines[k] : l)).join("\n");
 }
 
-/** afterColon escapes what follows a line's first colon that is a colon of
- * its own, not part of a `:::class` shorthand. */
+/** A line's own colon: not part of a `:::class` shorthand. */
+const ownColon = /(?<!:):(?!:)/;
+
+/** afterColon escapes what follows a line's own colon. */
 function afterColon(line: string): string {
-  const m = /(?<!:):(?!:)/.exec(line);
+  const m = ownColon.exec(line);
   if (!m) return line;
-  const at = m.index;
-  return line.slice(0, at + 1) + esc(line.slice(at + 1));
+  return line.slice(0, m.index + 1) + entityAngles(line.slice(m.index + 1));
 }
 
-/** Shapes a flowchart node's label sits in, outermost delimiters first. */
+/** Shapes a flowchart node's label sits in, outermost delimiters first. `>`
+ * opens the asymmetric shape; it only counts right after a node id, which
+ * an arrow's `>` never is. */
 const shapes: [string, string][] = [
   ["([", "])"],
   ["[[", "]]"],
@@ -103,24 +121,33 @@ const shapes: [string, string][] = [
   ["[", "]"],
   ["(", ")"],
   ["{", "}"],
+  [">", "]"],
 ];
 
+/** The edge label written into its arrow: `A -- text --> B`, `A--text-->B`,
+ * `A == text ==> B`, `A -. text .-> B`, with an arrowhead, a cross, a circle
+ * or none. */
+const inlineEdge =
+  /((?:^|[\s\w\])}])(?:--|==|-\.)(?![->=.])\s*)([^"|]*?)(\s*(?:-->|--x|--o|---|==>|==x|==o|===|\.->|-\.-))/g;
+
 /** flowchartLine escapes the unquoted text of one flowchart line: node
- * labels inside their shape, `|edge labels|`, `-- edge labels -->`, and a
- * subgraph's title. Quoted text is already done and is passed over. */
+ * labels inside their shape, `|edge labels|`, labels written into an arrow,
+ * and a subgraph's title. Quoted text is already done and is passed over. */
 function flowchartLine(line: string): string {
   const t = line.trimStart();
   if (/^subgraph\b/.test(t)) {
     const lead = line.length - t.length;
     const m = /^subgraph\s+(\S+)(.*)$/.exec(t);
     if (!m) return line;
-    return line.slice(0, lead) + `subgraph ${m[1]}` + esc(m[2]);
+    return line.slice(0, lead) + `subgraph ${m[1]}` + entityAngles(m[2]);
   }
-  let out = line.replace(/\|([^|"]*)\|/g, (_, s: string) => `|${esc(s)}|`);
-  // `A -- text --> B`, `A == text ==> B`, `A -. text .-> B`.
+  let out = line.replace(
+    /\|([^|"]*)\|/g,
+    (_, s: string) => `|${entityAngles(s)}|`,
+  );
   out = out.replace(
-    /(\s(?:--|==|-\.)\s+)([^"|]*?)(\s+(?:-->|==>|\.->|---|-\.-))/g,
-    (_, a: string, s: string, b: string) => a + esc(s) + b,
+    inlineEdge,
+    (_, a: string, s: string, b: string) => a + entityAngles(s) + b,
   );
   // An unquoted label inside its shape, right after a node id.
   let res = "";
@@ -133,29 +160,25 @@ function flowchartLine(line: string): string {
       res += out[i++];
       continue;
     }
-    let j = i + m[0].length;
+    const at = i + m[0].length;
     res += m[0];
-    const shape = shapes.find(([o]) => out.startsWith(o, j));
-    if (!shape || out[j + shape[0].length] === '"') {
-      i = j;
-      continue;
-    }
+    i = at;
+    const shape = shapes.find(([o]) => out.startsWith(o, at));
+    if (!shape || out[at + shape[0].length] === '"') continue;
     const [o, c] = shape;
-    const end = out.indexOf(c, j + o.length);
-    if (end < 0) {
-      i = j;
-      continue;
-    }
-    res += o + esc(out.slice(j + o.length, end)) + c;
+    const end = out.indexOf(c, at + o.length);
+    if (end < 0) continue;
+    res += o + entityAngles(out.slice(at + o.length, end)) + c;
     i = end + c.length;
-    j = i;
   }
   return res;
 }
 
-/** The words that open a sequence line whose remainder is text. */
+/** The words that open a sequence line whose remainder is text: only a word
+ * standing alone, followed by a space, a colon or the line's end. A
+ * participant named `Title` sending `Title->>A` is a message, not a title. */
 const sequenceWords =
-  /^(\s*)(alt|else|opt|loop|par|and|critical|option|break|rect|box|participant|actor|create participant|create actor|note|title)\b(.*)$/i;
+  /^(\s*)(alt|else|opt|loop|par|and|critical|option|break|rect|box|participant|actor|create participant|create actor|note|title)(?=\s|:|$)(.*)$/i;
 
 export function escapeAngles(src: string): string {
   if (!/[<>]/.test(src)) return src;
@@ -163,6 +186,7 @@ export function escapeAngles(src: string): string {
   const flow = kind === "graph" || kind.startsWith("flowchart");
   const text = flow ? quotedAcross(src) : src;
   let inNote = false;
+  let inClass = false;
   return text
     .split("\n")
     .map((raw) => {
@@ -172,24 +196,39 @@ export function escapeAngles(src: string): string {
       const line = quotedIn(raw);
       if (kind === "sequenceDiagram") {
         const w = sequenceWords.exec(line);
-        if (w) return w[1] + w[2] + esc(w[3]);
+        if (w) return w[1] + w[2] + entityAngles(w[3]);
         return afterColon(line);
       }
       if (kind.startsWith("stateDiagram")) {
         if (inNote) {
-          if (/^end note\b/i.test(t)) inNote = false;
-          else return esc(line);
-          return line;
+          if (/^end note\b/i.test(t)) {
+            inNote = false;
+            return line;
+          }
+          return entityAngles(line);
         }
-        if (/^note\b/i.test(t) && !/(?<!:):(?!:)/.test(t)) {
+        if (/^note\b/i.test(t) && !ownColon.test(t)) {
           inNote = true;
           return line;
         }
         return afterColon(line);
       }
-      if (kind.startsWith("classDiagram") || kind === "erDiagram") {
+      if (kind.startsWith("classDiagram")) {
+        // A class body's members, `+List<Item> items`, are text whole.
+        if (inClass) {
+          if (t.startsWith("}")) {
+            inClass = false;
+            return line;
+          }
+          return entityAngles(line);
+        }
+        if (/^class\s+[^{]+\{\s*$/.test(t)) {
+          inClass = true;
+          return line;
+        }
         return afterColon(line);
       }
+      if (kind === "erDiagram") return afterColon(line);
       return line;
     })
     .join("\n");
