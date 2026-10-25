@@ -1,10 +1,4 @@
-import {
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-  type RefObject,
-} from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useResolved } from "./useResolved";
 import { download, fileName, toMermaid, toSvgFile } from "./diagramExport";
 import DiagramView from "./DiagramView";
@@ -414,7 +408,6 @@ export default function Diagram({ src }: { src: string }): ReactNode {
   const [full, setFull] = useState(false);
   const card = useRef<HTMLDivElement>(null);
   const title = diagramTitle(src);
-  const pane = usePane(card, out !== null && "own" in out);
 
   if (out === null) return <DiagramPending />;
   if ("error" in out) {
@@ -433,19 +426,16 @@ export default function Diagram({ src }: { src: string }): ReactNode {
   }
 
   // rongo's own drawing brings its canvas, so the card is only a frame for
-  // the two buttons. It starts where the text starts and is as wide as the
-  // drawing, out to the thread pane (spread), by margins: a transform would
-  // trap the full view's fixed overlay. Where there is no pane to measure, it
-  // stays in the text's width and scrolls there.
+  // the two buttons, as wide as the drawing and never wider than the text it
+  // sits in: a picture running past the prose read as out of place. Wider
+  // than the text it is scaled down, never scrolled; the full view is there
+  // to read it at size.
   if (out.own) {
-    const at = pane === null ? null : spread(pane, svgWidth(out.svg));
     return (
-      <div className="mt-3" style={at ?? undefined}>
+      <div className="mt-3">
         <div ref={card} className="relative w-max max-w-full">
           {tools(false)}
-          <div className="rongo-diagram-natural overflow-x-auto">
-            <MermaidSvg svg={out.svg} title={title} />
-          </div>
+          <MermaidSvg svg={out.svg} title={title} />
           {full && (
             <DiagramView
               src={src}
@@ -501,76 +491,6 @@ export default function Diagram({ src }: { src: string }): ReactNode {
       </div>
     );
   }
-}
-
-/** usePane measures the room a drawing has: the text it sits in, and how far
- * the thread pane (the element marked data-diagram-pane) reaches past it on
- * either side, kept current as either resizes: the rail dragged, the
- * Sources pane opened. Null where there is no such pane or nothing to
- * measure for. */
-function usePane(
-  card: RefObject<HTMLDivElement | null>,
-  active: boolean,
-): Room | null {
-  const [room, setRoom] = useState<Room | null>(null);
-  useLayoutEffect(() => {
-    const host = card.current?.closest<HTMLElement>("[data-diagram-pane]");
-    const text = card.current?.parentElement?.parentElement;
-    if (!active || !host || !text) return;
-    const measure = () => {
-      // A pane laid out at no width (not on screen yet) gives no measure.
-      if (host.clientWidth === 0) return setRoom(null);
-      const paneLeft = host.getBoundingClientRect().left + host.clientLeft;
-      const t = text.getBoundingClientRect();
-      const next = {
-        width: t.width,
-        left: Math.max(0, t.left - (paneLeft + gutter)),
-        right: Math.max(0, paneLeft + host.clientWidth - gutter - t.right),
-      };
-      // The text grows a line at a time while an answer streams, which the
-      // observer reports; unchanged room is no reason to draw again.
-      setRoom((prev) =>
-        prev &&
-        prev.width === next.width &&
-        prev.left === next.left &&
-        prev.right === next.right
-          ? prev
-          : next,
-      );
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(host);
-    ro.observe(text);
-    return () => ro.disconnect();
-  }, [card, active]);
-  return active ? room : null;
-}
-
-/** The space a drawing may take: the width of the text it sits in, and how
- * far the pane reaches past it on either side, less a gutter. */
-type Room = { width: number; left: number; right: number };
-const gutter = 16;
-
-/** spread is where a drawing svgW wide sits: in the text's own width when
- * it fits, else growing into the room on the right first — prose reads from
- * the left, so that is where the space is — then the left. Past both it
- * keeps the widest frame and scrolls. */
-export function spread(
-  room: Room,
-  svgW: number,
-): { marginLeft: number; width: number } | null {
-  const extra = svgW - room.width;
-  if (extra <= 0) return null;
-  const right = Math.min(extra, room.right);
-  const left = Math.min(extra - right, room.left);
-  return { marginLeft: -left, width: room.width + left + right };
-}
-
-/** svgWidth is the width a drawing states on its root element. */
-function svgWidth(svg: string): number {
-  return Number(/<svg\b[^>]*\swidth="(\d+(?:\.\d+)?)"/.exec(svg)?.[1] ?? 0);
 }
 
 /** The box a diagram's place holds while the picture is still being drawn,

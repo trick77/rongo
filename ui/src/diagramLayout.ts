@@ -615,65 +615,104 @@ export function layoutMapping(ir: FlowIR): FlowLayout {
     rows.push({ target: t.id, y: 0, h: 0 });
   }
 
-  // A box with k attach points on one side, one of them at its centre, needs
-  // room for the other k-1 on one side of it, each a spacing apart and clear
-  // of the corners.
-  const tall = (k: number, gap: number) =>
-    k < 2 ? 0 : up8(2 * (10 + gap * (k - 1)));
+  // A target's arrows enter in even slots from its top, a spacing apart, so
+  // a target reached four times is four slots tall and no taller. Its first
+  // slot is the arrow from the trigger that placed it, which runs straight;
+  // the others follow in the order their triggers stand.
+  const slotted = (k: number, g: number) => (k < 2 ? 0 : up8(k * g + 16));
+  // A trigger is centred on its straight arrow, so its other exits need room
+  // on one side of the centre, the attach-point spacing apart and clear of
+  // the corners.
+  const exitRoom = (k: number) => (k < 2 ? 0 : up8(2 * (10 + 16 * (k - 1))));
   const boxes = new Map<string, NodeBox>();
   for (const n of ir.nodes) boxes.set(n.id, lay(n, "step", w));
   for (const t of right) {
     const b = boxes.get(t.id)!;
-    b.h = Math.max(b.h, tall(edgesOf("to", t.id).length, spacing(t.id)));
+    b.h = Math.max(b.h, slotted(edgesOf("to", t.id).length, spacing(t.id)));
+  }
+  for (const s of left) {
+    const b = boxes.get(s.id)!;
+    b.h = Math.max(b.h, exitRoom(edgesOf("from", s.id).length));
   }
   rows.forEach((r) => (r.h = r.target ? boxes.get(r.target)!.h : 0));
   // A trigger alone in its row may need more height than its target.
   for (const s of left) {
     const [a, b] = span.get(s.id)!;
-    if (a === b)
-      rows[a].h = Math.max(
-        rows[a].h,
-        boxes.get(s.id)!.h,
-        tall(edgesOf("from", s.id).length, 16),
-      );
+    if (a === b) rows[a].h = Math.max(rows[a].h, boxes.get(s.id)!.h);
   }
   let y = zonePad.top;
   for (const r of rows) {
     r.y = y;
     y += r.h + gap;
   }
-  for (const s of left) {
-    const [a, b] = span.get(s.id)!;
-    const box = boxes.get(s.id)!;
-    box.x = zonePad.side;
-    box.y = rows[a].y;
-    box.h = rows[b].y + rows[b].h - rows[a].y;
-  }
   for (const t of right) {
     const r = rows[rowOf.get(t.id)!];
     boxes.get(t.id)!.y = r.y + (r.h - boxes.get(t.id)!.h) / 2;
   }
 
-  const ys = new Map<number, number>();
-  const yt = new Map<number, number>();
-  const exits = new Map<string, number[]>();
-  const entries = new Map<string, { y: number; labelled: boolean }[]>();
-  const take = <T>(m: Map<string, T[]>, id: string, v: T) =>
-    m.set(id, [...(m.get(id) ?? []), v]);
-  const centre = (id: string) => boxes.get(id)!.y + boxes.get(id)!.h / 2;
-  // Straight arrows first: into the targets each trigger placed.
-  const bent: number[] = [];
+  // Which arrow placed each target, and the order its arrows enter in.
+  const placer = new Map<string, number>();
   ir.edges.forEach((e, i) => {
     const [a, b] = span.get(e.from)!;
     const r = rowOf.get(e.to)!;
-    const mine = r >= a && r <= b && !entries.has(e.to);
-    if (!mine) return bent.push(i);
-    const c = Math.round(centre(e.to));
+    if (r >= a && r <= b && !placer.has(e.to)) placer.set(e.to, i);
+  });
+  const slotOf = new Map<number, number>();
+  for (const t of right) {
+    const into = edgesOf("to", t.id)
+      .map(({ i }) => i)
+      .sort(
+        (p, q) =>
+          Number(placer.get(t.id) !== p) - Number(placer.get(t.id) !== q) ||
+          author.get(ir.edges[p].from)! - author.get(ir.edges[q].from)! ||
+          p - q,
+      );
+    into.forEach((i, j) => slotOf.set(i, j));
+  }
+  const slotY = (i: number) => {
+    const t = boxes.get(ir.edges[i].to)!;
+    const k = edgesOf("to", t.id).length;
+    if (k < 2) return Math.round(t.y + t.h / 2);
+    const g = spacing(t.id);
+    return Math.round(t.y + (t.h - k * g) / 2 + g * (slotOf.get(i)! + 0.5));
+  };
+
+  const ys = new Map<number, number>();
+  const yt = new Map<number, number>();
+  const exits = new Map<string, number[]>();
+  const take = <T>(m: Map<string, T[]>, id: string, v: T) =>
+    m.set(id, [...(m.get(id) ?? []), v]);
+  // Straight arrows first: each leaves its trigger level with its slot.
+  const bent: number[] = [];
+  ir.edges.forEach((e, i) => {
+    if (placer.get(e.to) !== i) return bent.push(i);
+    const c = slotY(i);
     ys.set(i, c);
     yt.set(i, c);
     take(exits, e.from, c);
-    take(entries, e.to, { y: c, labelled: e.label !== "" });
   });
+  // A trigger spanning several rows fills them; one alone in its row keeps
+  // its own height, centred on its straight arrow, never a box stretched to
+  // a tall target's height with nothing in it. A trigger with no straight
+  // arrow is held by nothing on the right, so it closes up under the one
+  // above instead of waiting for its row.
+  let floor = zonePad.top;
+  for (const s of left) {
+    const [a, b] = span.get(s.id)!;
+    const box = boxes.get(s.id)!;
+    box.x = zonePad.side;
+    if (a !== b) {
+      box.y = rows[a].y;
+      box.h = rows[b].y + rows[b].h - rows[a].y;
+    } else {
+      const level = exits.get(s.id)?.[0];
+      box.y =
+        level === undefined
+          ? floor
+          : Math.max(floor, Math.round(level - box.h / 2));
+    }
+    floor = box.y + box.h + rowGap;
+  }
   // nearest is the free height on a box closest to want.
   const nearest = (
     box: NodeBox,
@@ -696,25 +735,13 @@ export function layoutMapping(ir: FlowIR): FlowLayout {
   );
   for (const i of bent) {
     const e = ir.edges[i];
-    const tc = centre(e.to);
-    const y0 = nearest(boxes.get(e.from)!, tc, (y) =>
+    const y1 = slotY(i);
+    const y0 = nearest(boxes.get(e.from)!, y1, (y) =>
       (exits.get(e.from) ?? []).every((u) => Math.abs(u - y) >= 16),
-    );
-    const lab = e.label !== "";
-    const y1 = nearest(boxes.get(e.to)!, y0, (y) =>
-      (entries.get(e.to) ?? []).every((u) => {
-        const d = y - u.y;
-        if (Math.abs(d) < 16) return false;
-        // Nothing within a label's height above a labelled entry.
-        if (lab && d > 0 && d < room) return false;
-        if (u.labelled && d < 0 && -d < room) return false;
-        return true;
-      }),
     );
     ys.set(i, y0);
     yt.set(i, y1);
     take(exits, e.from, y0);
-    take(entries, e.to, { y: y1, labelled: lab });
   }
   const srcBoxes = left.map((n) => boxes.get(n.id)!);
   const tgtBoxes = right.map((n) => boxes.get(n.id)!);

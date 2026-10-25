@@ -36,7 +36,6 @@ import Diagram, {
   diagramTitle,
   draw,
   parseDiagram,
-  spread,
   themeVariables,
   type FlowSpec,
   type SequenceSpec,
@@ -81,72 +80,29 @@ describe("rongo's own drawing", () => {
     expect(out).toEqual({ svg: expect.stringContaining("drawn") });
   });
 
-  it("sets its drawing at full size, in a frame as wide as the pane it sits in", async () => {
+  it("fits its drawing to the frame rather than scrolling it", async () => {
     editorial.mockResolvedValueOnce('<svg data-own="1" width="900"></svg>');
     const { container, findByLabelText } = render(
-      <div data-diagram-pane>
-        <Diagram src={"flowchart TD\n wide --> frame"} />
-      </div>,
+      <Diagram src={"flowchart TD\n wide --> frame"} />,
     );
-    const pane = container.firstElementChild as HTMLElement;
-    Object.defineProperty(pane, "clientWidth", { value: 1232 });
     await findByLabelText(/full view/);
-    expect(
-      container.querySelector(".rongo-diagram-natural svg"),
-    ).not.toBeNull();
+    expect(container.querySelector(".rongo-diagram svg")).not.toBeNull();
+    expect(container.querySelector(".overflow-x-auto")).toBeNull();
     // No card ground of its own: the drawing brings its canvas.
     expect(container.querySelector(".bg-panel")).toBeNull();
   });
 
-  it("grows past the text into the pane, right first, less a gutter", async () => {
-    editorial.mockResolvedValueOnce('<svg data-own="1" width="900"></svg>');
-    // The layout measured in the browser: a 767px pane at x 362, the answer's
-    // 600px of text at x 400.
-    const pane = document.createElement("div");
-    pane.setAttribute("data-diagram-pane", "");
-    Object.defineProperty(pane, "clientWidth", { value: 767 });
-    pane.getBoundingClientRect = () => ({ left: 362 }) as DOMRect;
-    const text = document.createElement("div");
-    text.getBoundingClientRect = () =>
-      ({ left: 400, right: 1000, width: 600 }) as DOMRect;
-    pane.appendChild(text);
-    document.body.appendChild(pane);
-    const { findByLabelText } = render(
-      <Diagram src={"flowchart TD\n measured --> pane"} />,
-      { container: text },
-    );
-    const button = await findByLabelText(/full view/);
-    const frame = button.closest(".mt-3") as HTMLElement;
-    // 113px free on the right, then the 22 on the left; the rest scrolls.
-    expect(frame.style.width).toBe("735px");
-    expect(frame.style.marginLeft).toBe("-22px");
-    pane.remove();
-  });
-
-  it("stays in the column where there is no pane to measure", async () => {
+  it("never runs wider than the text it sits in", async () => {
     editorial.mockResolvedValueOnce('<svg data-own="1" width="900"></svg>');
     const { findByLabelText } = render(
-      <Diagram src={"flowchart TD\n no --> pane"} />,
+      <Diagram src={"flowchart TD\n no --> wider"} />,
     );
     const button = await findByLabelText(/full view/);
-    expect((button.closest(".mt-3") as HTMLElement).style.width).toBe("");
-  });
-});
-
-describe("spread", () => {
-  const room = { width: 600, left: 40, right: 100 };
-
-  it("keeps a drawing that fits in the text's own width", () => {
-    expect(spread(room, 600)).toBeNull();
-  });
-
-  it("grows right before it grows left", () => {
-    expect(spread(room, 680)).toEqual({ marginLeft: -0, width: 680 });
-    expect(spread(room, 720)).toEqual({ marginLeft: -20, width: 720 });
-  });
-
-  it("stops at the pane's gutters and leaves the rest to scroll", () => {
-    expect(spread(room, 2000)).toEqual({ marginLeft: -40, width: 740 });
+    const card = button.closest(".relative") as HTMLElement;
+    expect(card.className).toContain("max-w-full");
+    expect(
+      (card.parentElement as HTMLElement).getAttribute("style"),
+    ).toBeNull();
   });
 });
 
