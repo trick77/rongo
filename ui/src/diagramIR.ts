@@ -480,6 +480,7 @@ type ErDb = {
     relSpec?: { cardA?: string; cardB?: string; relType?: string };
   }[];
   getDirection(): string | undefined;
+  getSubGraphs?(): unknown[];
 };
 
 function isErDb(db: unknown): db is ErDb {
@@ -501,12 +502,15 @@ const cards: Record<string, Card> = {
  * relationship with its role and the cardinality at either end. A
  * relationship's cardA is the one written at entityB's side (`A ||--o{ B`
  * reads cardA "zero or more", cardB "only one"), so it is drawn at B. An
- * entity related to itself, an unknown cardinality and a direction other
- * than down or right are pictures this does not draw. */
+ * entity related to itself, an unknown cardinality, a direction other than
+ * down or right and a subgraph grouping tables are pictures this does not
+ * draw. So is a relationship naming anything but an entity: dropped, the
+ * picture would leave a relationship out and say nothing. */
 function erIR(db: unknown): ERIR | null {
   if (!isErDb(db)) return null;
   const dir = db.getDirection() ?? "TB";
   if (dir !== "TB" && dir !== "LR") return null;
+  if ((db.getSubGraphs?.() ?? []).length > 0) return null;
   const entities: EntityIR[] = [];
   const byKey = new Map<string, string>();
   for (const [name, e] of db.getEntities()) {
@@ -531,8 +535,7 @@ function erIR(db: unknown): ERIR | null {
   for (const r of db.getRelationships()) {
     const from = byKey.get(r.entityA);
     const to = byKey.get(r.entityB);
-    if (from === undefined || to === undefined) continue;
-    if (from === to) return null;
+    if (from === undefined || to === undefined || from === to) return null;
     const toCard = cards[r.relSpec?.cardA ?? ""];
     const fromCard = cards[r.relSpec?.cardB ?? ""];
     if (toCard === undefined || fromCard === undefined) return null;

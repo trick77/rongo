@@ -312,7 +312,7 @@ export const ownKinds: ReadonlySet<string> = new Set([
  * that throws — is a reason to let the renderer draw, never a failed
  * picture. */
 async function ours(mermaid: Mermaid, src: string): Promise<string | null> {
-  // Asked by kind before anything loads: a state or an entity diagram
+  // Asked by kind before anything loads: a class diagram or a gantt chart
   // never fetches the layout engine or parses its source a second time.
   if (!ownKinds.has(diagramKind(src))) return null;
   try {

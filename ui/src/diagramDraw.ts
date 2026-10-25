@@ -18,7 +18,13 @@ import {
 } from "./diagramSequence";
 import { ramp, textWidth, type Palette } from "./diagramTheme";
 import type { Card } from "./diagramIR";
-import type { ERLayout, Table } from "./diagramER";
+import {
+  rowLine,
+  rowPad,
+  tablePad,
+  type ERLayout,
+  type Table,
+} from "./diagramER";
 
 /**
  * A layout written as SVG, in the reference design's vocabulary: a canvas in
@@ -294,19 +300,25 @@ function entity(n: NodeBox, t: Table, pal: Palette): string {
           stroke: pal.line,
           "stroke-width": 1,
         });
-  const name = el(
-    "text",
-    {
-      x: f(n.x + 16),
-      y: f(n.y + t.head / 2),
-      fill: pal.fg,
-      "font-family": t.name.face === "mono" ? pal.mono : undefined,
-      "font-size": t.name.size,
-      "font-weight": t.name.bold ? 600 : undefined,
-      "dominant-baseline": "central",
-    },
-    esc(t.name.text),
-  );
+  const first =
+    n.y + t.head / 2 - ((t.name.lines.length - 1) * ramp.lineHeight) / 2;
+  const name = t.name.lines
+    .map((line, i) =>
+      el(
+        "text",
+        {
+          x: f(n.x + tablePad),
+          y: f(first + i * ramp.lineHeight),
+          fill: pal.fg,
+          "font-family": t.name.face === "mono" ? pal.mono : undefined,
+          "font-size": t.name.size,
+          "font-weight": t.name.bold ? 600 : undefined,
+          "dominant-baseline": "central",
+        },
+        esc(line),
+      ),
+    )
+    .join("");
   const rows = t.rows
     .map((row) =>
       row.cells
@@ -317,7 +329,7 @@ function entity(n: NodeBox, t: Table, pal: Palette): string {
                 "text",
                 {
                   x: f(n.x + c.x),
-                  y: f(n.y + row.y + 3 + i * 16 + 8),
+                  y: f(n.y + row.y + rowPad / 2 + i * rowLine + rowLine / 2),
                   fill: c.muted ? pal.muted : pal.fg,
                   "font-family": c.face === "mono" ? pal.mono : undefined,
                   "font-size": c.size,

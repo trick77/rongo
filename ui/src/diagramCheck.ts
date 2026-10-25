@@ -119,8 +119,10 @@ export function checkER(l: ERLayout): string[] {
   const out = check(l);
   for (const n of l.nodes) {
     const t = l.tables.get(n.id)!;
-    if (textWidth(t.name.text, t.name.size, t.name.face) > n.w - 2 * tablePad)
-      out.push(`${n.id}: its name overflows its table`);
+    for (const line of t.name.lines) {
+      if (textWidth(line, t.name.size, t.name.face) > n.w - 2 * tablePad)
+        out.push(`${n.id}: its name overflows its table`);
+    }
     for (const r of t.rows) {
       for (const c of r.cells) {
         for (const line of c.text) {

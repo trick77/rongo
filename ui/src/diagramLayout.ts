@@ -943,23 +943,9 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
   const labels = ir.edges.map((e) =>
     e.label !== "" ? labelBox(e.label) : null,
   );
-  const edges: ElkExtendedEdge[] = ir.edges.map((e, i) => ({
-    id: `e${i}`,
-    sources: [src[i]],
-    targets: [dst[i]],
-    ...(labels[i]
-      ? {
-          labels: [
-            {
-              id: `e${i}l`,
-              text: e.label,
-              width: labels[i]!.w,
-              height: labels[i]!.h,
-            },
-          ],
-        }
-      : {}),
-  }));
+  const edges = ir.edges.map((e, i) =>
+    elkEdge(`e${i}`, src[i], dst[i], e.label, labels[i]),
+  );
 
   const root = await elk.layout({
     id: "root",
@@ -985,7 +971,10 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
       // in the middle of the picture. Greedy, so only a real cycle is
       // broken: plain MODEL_ORDER reversed every edge written against the
       // order, and a failure state mentioned early was hung at the top with
-      // every later transition into it climbing up as a loop back.
+      // every later transition into it climbing up as a loop back. Shared
+      // with flowcharts on purpose: a flowchart's retry is read the same
+      // way, as the edge written against the order. Every corpus flowchart
+      // ELK draws came out byte for byte the same with it.
       "elk.layered.cycleBreaking.strategy": "GREEDY_MODEL_ORDER",
       "elk.layered.crossingMinimization.forceNodeModelOrder": "true",
       "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
@@ -1023,14 +1012,7 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
 
   const routes: EdgeRoute[] = (root.edges ?? []).map((e, i) => {
     const ie = ir.edges[i];
-    const sec = e.sections?.[0];
-    let points = sec
-      ? [sec.startPoint, ...(sec.bendPoints ?? []), sec.endPoint].map((p) => ({
-          x: Math.round(p.x),
-          y: Math.round(p.y),
-        }))
-      : [];
-    points = tidy(points);
+    const points = elkPoints(e);
     const from = boxes.get(ie.from)!;
     const to = boxes.get(ie.to)!;
     if (points.length >= 2) {
@@ -1054,18 +1036,56 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
       warn: ie.dashed,
       head: ie.head,
     };
-    const l = e.labels?.[0];
-    if (l && labels[i])
-      route.label = {
-        ...labels[i]!,
-        x: Math.round(l.x ?? 0),
-        y: Math.round(l.y ?? 0),
-      };
+    const label = elkLabel(e, labels[i]);
+    if (label) route.label = label;
     return route;
   });
   const nodes = ir.nodes.map((n) => boxes.get(n.id)!);
   widenForTitles(nodes, routes, zones);
   return frame(nodes, routes, zones);
+}
+
+/** elkEdge is an edge for the engine, carrying its label's measured box so
+ * the layout makes room for it. Shared by every ELK layout. */
+export function elkEdge(
+  id: string,
+  source: string,
+  target: string,
+  text: string,
+  box: { w: number; h: number } | null,
+): ElkExtendedEdge {
+  return {
+    id,
+    sources: [source],
+    targets: [target],
+    ...(box
+      ? { labels: [{ id: `${id}l`, text, width: box.w, height: box.h }] }
+      : {}),
+  };
+}
+
+/** elkPoints is an edge's route as the engine laid it out, on whole pixels
+ * and without the points rounding made redundant. */
+export function elkPoints(e: ElkExtendedEdge): Point[] {
+  const sec = e.sections?.[0];
+  if (!sec) return [];
+  return tidy(
+    [sec.startPoint, ...(sec.bendPoints ?? []), sec.endPoint].map((p) => ({
+      x: Math.round(p.x),
+      y: Math.round(p.y),
+    })),
+  );
+}
+
+/** elkLabel is an edge's label where the engine put it, or undefined for
+ * an edge that had none. */
+export function elkLabel(
+  e: ElkExtendedEdge,
+  box: { lines: string[]; w: number; h: number } | null,
+): LabelBox | undefined {
+  const l = e.labels?.[0];
+  if (!l || !box) return undefined;
+  return { ...box, x: Math.round(l.x ?? 0), y: Math.round(l.y ?? 0) };
 }
 
 /** widenForTitles makes every zone at least as wide as its title. ELK sizes

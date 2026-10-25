@@ -477,6 +477,16 @@ describe("toIR for an entity model", () => {
     expect(await ir("erDiagram\n  A ||--o{ A : parent")).toBeNull();
   });
 
+  it("declines tables grouped in a subgraph rather than drop what joins it", async () => {
+    expect(
+      await ir(`erDiagram
+  subgraph Billing
+    INVOICE ||--o{ LINE : has
+  end
+  CUSTOMER ||--o{ Billing : owns`),
+    ).toBeNull();
+  });
+
   it("fits up to eight entities", async () => {
     const src = (n: number) =>
       "erDiagram\n" +

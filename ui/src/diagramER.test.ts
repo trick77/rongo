@@ -118,6 +118,41 @@ describe("layoutER", () => {
     expect(await faces("THREAD", "Verdict")).toEqual(["sans", "sans"]);
   });
 
+  it("breaks a name and a field where the source breaks them, and makes room", async () => {
+    const l = await layoutER(
+      model(
+        [
+          {
+            id: "A",
+            label: "Customer\nAccount",
+            attrs: [
+              {
+                type: "string",
+                name: "line one\nline two",
+                keys: [],
+                comment: "",
+              },
+            ],
+          },
+        ],
+        [],
+      ),
+      new ELK(),
+    );
+    const t = l.tables.get("A")!;
+    expect(t.name.lines).toEqual(["Customer", "Account"]);
+    expect(t.head).toBeGreaterThan(36);
+    const name = t.rows[0].cells.find((c) => c.text[0] === "line one")!;
+    expect(name.text).toEqual(["line one", "line two"]);
+    expect(t.rows[0].h).toBeGreaterThan(22);
+    const doc = parse(drawER(l, pal));
+    const texts = [...doc.querySelectorAll("text")].map((x) => x.textContent);
+    expect(texts).toEqual(
+      expect.arrayContaining(["Customer", "Account", "line one", "line two"]),
+    );
+    expect(checkER(l)).toEqual([]);
+  });
+
   it("lays a left-to-right model out left to right", async () => {
     const l = await layoutER({ ...threads, direction: "LR" }, new ELK());
     const [a, b] = ["THREAD", "MESSAGE"].map((id) =>

@@ -1,10 +1,12 @@
-import type { ElkExtendedEdge, ElkNode } from "elkjs/lib/elk-api";
+import type { ElkNode } from "elkjs/lib/elk-api";
 import type { Card, ERIR, EntityIR } from "./diagramIR";
 import {
   frame,
   labelBox,
   looksLikeCode,
-  tidy,
+  elkEdge,
+  elkLabel,
+  elkPoints,
   type EdgeRoute,
   type Elk,
   type FlowLayout,
@@ -35,7 +37,8 @@ export type TableRow = {
   h: number;
 };
 export type Table = {
-  name: { text: string; face: Face; size: number; bold: boolean };
+  /** The name, a line per entry: a `<br>` in an alias is a line break. */
+  name: { lines: string[]; face: Face; size: number; bold: boolean };
   /** The head's height; rows start under it. */
   head: number;
   rows: TableRow[];
@@ -49,9 +52,12 @@ export type ERLayout = FlowLayout & {
 /** Text to frame, each side. */
 export const tablePad = 16;
 const colGap = 12;
+/** A head of one name line; each line more adds a line height. */
 const headH = 36;
-const rowLine = 16;
-const rowPad = 6;
+/** A field row: each line of its tallest cell, and the room around them,
+ * half above and half below. drawER places text by the same two. */
+export const rowLine = 16;
+export const rowPad = 6;
 /** The least width of a table, and the widest a comment runs before it
  * wraps. */
 const tableMin = 140;
@@ -66,7 +72,9 @@ const cell = (
   muted: boolean,
   max?: number,
 ) => ({
-  text: max ? wrap(text, max, size, face) : [text],
+  // Wrapped even with no measure: wrap keeps a label's own line breaks,
+  // and a `<br>` in a field is one.
+  text: wrap(text, max ?? Infinity, size, face),
   face,
   size,
   muted,
@@ -76,17 +84,17 @@ const cell = (
  * wide as its widest entry. code sets its name in the mono rather than
  * the bold sans. */
 function table(e: EntityIR, code: boolean): { t: Table; w: number; h: number } {
-  const name = {
-    text: e.label,
-    face: (code ? "mono" : "sans") as Face,
-    size: code ? ramp.code : ramp.bold,
-    bold: !code,
-  };
-  const nameW = textWidth(name.text, name.size, name.face) + 2 * tablePad;
+  const face: Face = code ? "mono" : "sans";
+  const size = code ? ramp.code : ramp.bold;
+  const name = { lines: e.label.split("\n"), face, size, bold: !code };
+  const nameW =
+    Math.max(...name.lines.map((l) => textWidth(l, size, face))) + 2 * tablePad;
+  const more = (name.lines.length - 1) * ramp.lineHeight;
   if (e.attrs.length === 0) {
     const w = Math.max(tableMin, Math.ceil(nameW));
-    return { t: { name, head: 40, rows: [] }, w, h: 40 };
+    return { t: { name, head: 40 + more, rows: [] }, w, h: 40 + more };
   }
+  const head = headH + more;
   const grid = e.attrs.map((a) => [
     cell(a.type, "mono", ramp.code, true),
     cell(a.name, "mono", ramp.code, false),
@@ -109,7 +117,7 @@ function table(e: EntityIR, code: boolean): { t: Table; w: number; h: number } {
     if (w > 0 || c < 2) x += Math.ceil(w) + colGap;
   });
   const w = Math.max(tableMin, Math.ceil(nameW), x - colGap + tablePad);
-  let y = headH + rowPad / 2;
+  let y = head + rowPad / 2;
   const rows: TableRow[] = grid.map((r) => {
     const h = Math.max(...r.map((c) => c.text.length)) * rowLine + rowPad;
     const row = {
@@ -122,7 +130,7 @@ function table(e: EntityIR, code: boolean): { t: Table; w: number; h: number } {
     y += h;
     return row;
   });
-  return { t: { name, head: headH, rows }, w, h: Math.ceil(y + rowPad / 2) };
+  return { t: { name, head, rows }, w, h: Math.ceil(y + rowPad / 2) };
 }
 
 export async function layoutER(ir: ERIR, elk: Elk): Promise<ERLayout> {
@@ -156,23 +164,9 @@ export async function layoutER(ir: ERIR, elk: Elk): Promise<ERLayout> {
     width: boxes.get(e.id)!.w,
     height: boxes.get(e.id)!.h,
   }));
-  const edges: ElkExtendedEdge[] = ir.rels.map((r, i) => ({
-    id: `e${i}`,
-    sources: [r.from],
-    targets: [r.to],
-    ...(labels[i]
-      ? {
-          labels: [
-            {
-              id: `e${i}l`,
-              text: r.label,
-              width: labels[i]!.w,
-              height: labels[i]!.h,
-            },
-          ],
-        }
-      : {}),
-  }));
+  const edges = ir.rels.map((r, i) =>
+    elkEdge(`e${i}`, r.from, r.to, r.label, labels[i]),
+  );
   const root = await elk.layout({
     id: "root",
     layoutOptions: {
@@ -205,32 +199,16 @@ export async function layoutER(ir: ERIR, elk: Elk): Promise<ERLayout> {
   }
   const routes: EdgeRoute[] = (root.edges ?? []).map((e, i) => {
     const r = ir.rels[i];
-    const sec = e.sections?.[0];
-    const points = tidy(
-      sec
-        ? [sec.startPoint, ...(sec.bendPoints ?? []), sec.endPoint].map(
-            (p) => ({
-              x: Math.round(p.x),
-              y: Math.round(p.y),
-            }),
-          )
-        : [],
-    );
     const route: EdgeRoute = {
       from: r.from,
       to: r.to,
-      points,
+      points: elkPoints(e),
       dashed: r.dashed,
       warn: false,
       head: "none",
     };
-    const l = e.labels?.[0];
-    if (l && labels[i])
-      route.label = {
-        ...labels[i]!,
-        x: Math.round(l.x ?? 0),
-        y: Math.round(l.y ?? 0),
-      };
+    const label = elkLabel(e, labels[i]);
+    if (label) route.label = label;
     return route;
   });
   const nodes = ir.entities.map((e) => boxes.get(e.id)!);
