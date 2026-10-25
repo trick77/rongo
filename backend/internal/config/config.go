@@ -204,7 +204,7 @@ const minSessionSecret = 32
 // seconds, 14.5 minutes, so 15 minutes lets a slow endpoint finish. 15 minutes
 // is a hard cap, never raised: an unpinned answer whose no-knob cap would not
 // fit (8192 on mimo-v2.6-flash, 24576 tokens, 20.5 minutes) sends Balanced,
-// whose allowance is the level's; every other model sends no knob.
+// whose allowance is the level's.
 // ask's TestAnswerCap_fitsTheDefaultTimeoutOnEveryModel checks the sum
 // against every shipped model's actual cap; raising the answer budget or a
 // profile's allowance past it fails there.
