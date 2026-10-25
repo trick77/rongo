@@ -5,17 +5,25 @@ import { render, fireEvent, waitFor } from "@testing-library/react";
 // stand in for it: parse accepts anything that does not say `bad`, and
 // render answers with a marked SVG. What is under test is what diagram.tsx
 // does around the renderer: source selection, the cache, the fallbacks.
-const parse = vi.fn(async (src: string) => {
-  if (src.includes("bad")) throw new Error("Parse error on line 1");
+// Like the real one, parse answers false rather than throwing when asked
+// to suppress errors.
+type ParseOpts = { suppressErrors?: boolean };
+const refuse = (src: string, opts?: ParseOpts) => {
+  if (opts?.suppressErrors) return false;
+  throw new Error(`Parse error on line ${src.includes("bad") ? 1 : 2}`);
+};
+const defaultParse = async (src: string, opts?: ParseOpts) => {
+  if (src.includes("bad")) return refuse(src, opts);
   return { diagramType: src.split(/\s+/)[0] };
-});
+};
+const parse = vi.fn(defaultParse);
 const renderSvg = vi.fn(async (id: string, src: string) => ({
   svg: `<svg id="${id}" data-src="${src.length}"><g class="drawn"></g></svg>`,
 }));
 vi.mock("mermaid", () => ({
   default: {
     initialize: vi.fn(),
-    parse: (s: string) => parse(s),
+    parse: (s: string, o?: ParseOpts) => parse(s, o),
     render: (i: string, s: string) => renderSvg(i, s),
   },
 }));
@@ -42,7 +50,8 @@ import Diagram, {
 } from "./diagram";
 
 beforeEach(() => {
-  parse.mockClear();
+  parse.mockReset();
+  parse.mockImplementation(defaultParse);
   renderSvg.mockClear();
   editorial.mockReset();
   editorial.mockResolvedValue(null);
@@ -103,6 +112,45 @@ describe("rongo's own drawing", () => {
     expect(
       (card.parentElement as HTMLElement).getAttribute("style"),
     ).toBeNull();
+  });
+});
+
+describe("draw and angle brackets", () => {
+  it("draws the source as written when the escaped one does not parse", async () => {
+    // The renderer refuses the escaped text, every time it is asked.
+    parse.mockImplementation(async (s: string, o?: ParseOpts) =>
+      s.includes("#lt;") ? refuse(s, o) : { diagramType: "sequenceDiagram" },
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const src = "sequenceDiagram\n  A->>B: List<Order> back";
+    const out = await draw(src);
+    expect(out).toEqual({ svg: expect.stringContaining("drawn") });
+    expect(renderSvg).toHaveBeenLastCalledWith(expect.any(String), src);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("does not fall back, nor keep the result, when the escaped text parses but drawing fails", async () => {
+    renderSvg.mockRejectedValueOnce(new Error("chunk gone"));
+    const src = "sequenceDiagram\n  A->>B: Map<K> once";
+    expect(await draw(src)).toEqual({ error: "chunk gone" });
+    // The next attempt draws, with its brackets.
+    expect(await draw(src)).toEqual({ svg: expect.stringContaining("drawn") });
+    expect(renderSvg).toHaveBeenLastCalledWith(
+      expect.any(String),
+      "sequenceDiagram\n  A->>B: Map#lt;K#gt; once",
+    );
+  });
+
+  it("quotes the source as written when neither parses", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const out = await draw("sequenceDiagram\n  bad A->>B: List<Order>");
+    expect(out).toEqual({ error: "Parse error on line 1" });
+    expect(parse).toHaveBeenLastCalledWith(
+      "sequenceDiagram\n  bad A->>B: List<Order>",
+      undefined,
+    );
+    warn.mockRestore();
   });
 });
 

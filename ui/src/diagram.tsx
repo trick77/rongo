@@ -1,6 +1,10 @@
 import { useRef, useState, type ReactNode } from "react";
 import { useResolved } from "./useResolved";
 import { download, fileName, toMermaid, toSvgFile } from "./diagramExport";
+import { escapeAngles } from "./diagramText";
+import { diagramKind } from "./diagramKind";
+
+export { diagramKind };
 import DiagramView from "./DiagramView";
 import { DownloadIcon, ExpandIcon } from "./icons";
 
@@ -168,21 +172,6 @@ export function diagramSource(tag: string, body: string): string | null {
  * prose about the format inside a code block is not mistaken for one. */
 const specRe = /^\s*\{\s*"type"\s*:\s*"(?:flow|sequence)"/;
 
-/** diagramKind is the first word of the source, which is the diagram type in
- * mermaid's grammar: `flowchart`, `sequenceDiagram`, `stateDiagram-v2`. A
- * leading `%%{init}%%` directive or comment is skipped. Empty when there is
- * no such word, or when the word is not the shape of a type name; the
- * backend reads it the same way (renumber.go mermaidKind). */
-export function diagramKind(src: string): string {
-  for (const line of src.split("\n")) {
-    const t = line.trim();
-    if (t === "" || t.startsWith("%%")) continue;
-    const word = t.split(/\s+/)[0].replace(/[;:]$/, "");
-    return /^[A-Za-z][A-Za-z0-9-]*$/.test(word) ? word : "";
-  }
-  return "";
-}
-
 const titles: Record<string, string> = {
   flowchart: "Flow diagram",
   graph: "Flow diagram",
@@ -342,6 +331,12 @@ let seq = 0;
  * network blip); kept, that failure would follow the source for the rest of
  * the session. A refused source is cheap to refuse again.
  *
+ * The source is drawn with its angle brackets kept as text (escapeAngles,
+ * diagramText.ts). Should that ever fail to parse where the source as
+ * written does, the source as written is drawn: keeping a bracket must never
+ * cost a picture that drew without it, and a refusal quotes what the model
+ * wrote, not the escaped text.
+ *
  * Exported for the tests, which mock the renderer and assert on the cache. */
 export function draw(src: string): Promise<Drawn> {
   let p = drawn.get(src);
@@ -349,14 +344,26 @@ export function draw(src: string): Promise<Drawn> {
     p = (async (): Promise<Drawn> => {
       try {
         const mermaid = await renderer();
-        // rongo's drawing first: its own parse is the only one a flowchart
-        // pays for. A source it cannot parse is declined like any other and
-        // meets the renderer's parse below, which says why.
-        const own = await ours(mermaid, src);
-        if (own !== null) return { svg: own, own: true };
-        await mermaid.parse(src);
-        const { svg } = await mermaid.render(`rongo-diagram-${++seq}`, src);
-        return { svg };
+        const text = escapeAngles(src);
+        if (text !== src) {
+          try {
+            return await drawFrom(mermaid, text);
+          } catch (e) {
+            // Only a refusal of the escaped text falls back. Anything else (a
+            // chunk gone after a redeploy, a blip) is no reason to cache a
+            // picture without its brackets for the session; it fails this
+            // attempt like any other, and the next one tries again.
+            if (await mermaid.parse(text, { suppressErrors: true })) throw e;
+            // A form escapeAngles escapes into something the renderer
+            // refuses: drawn below as written, its brackets lost as before.
+            // Said, so the gap shows.
+            console.warn(
+              "diagram: escaped source refused, drawn as written",
+              e,
+            );
+          }
+        }
+        return await drawFrom(mermaid, src);
       } catch (e) {
         drawn.delete(src);
         return { error: e instanceof Error ? e.message : String(e) };
@@ -365,6 +372,17 @@ export function draw(src: string): Promise<Drawn> {
     drawn.set(src, p);
   }
   return p;
+}
+
+/** drawFrom is one attempt at a drawing. rongo's own first: its parse is
+ * the only one a flowchart pays for. A source it cannot parse is declined
+ * like any other and meets the renderer's parse, which says why. */
+async function drawFrom(mermaid: Mermaid, text: string): Promise<Drawn> {
+  const own = await ours(mermaid, text);
+  if (own !== null) return { svg: own, own: true };
+  await mermaid.parse(text);
+  const { svg } = await mermaid.render(`rongo-diagram-${++seq}`, text);
+  return { svg };
 }
 
 /** useDrawn is the drawing for a source, null while it is on its way. */
