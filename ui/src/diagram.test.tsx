@@ -107,11 +107,23 @@ describe("rongo's own drawing", () => {
       <Diagram src={"flowchart TD\n no --> wider"} />,
     );
     const button = await findByLabelText(/full view/);
-    const card = button.closest(".relative") as HTMLElement;
+    const card = button.closest(".w-max") as HTMLElement;
     expect(card.className).toContain("max-w-full");
     expect(
       (card.parentElement as HTMLElement).getAttribute("style"),
     ).toBeNull();
+  });
+
+  it("keeps its buttons above the canvas, never over the drawing", async () => {
+    editorial.mockResolvedValueOnce('<svg data-own="1" width="900"></svg>');
+    const { findByLabelText } = render(
+      <Diagram src={"flowchart TD\n tools --> above"} />,
+    );
+    const row = (await findByLabelText(/full view/)).parentElement!;
+    expect(row.className).not.toContain("absolute");
+    expect(row.nextElementSibling?.classList.contains("rongo-diagram")).toBe(
+      true,
+    );
   });
 });
 

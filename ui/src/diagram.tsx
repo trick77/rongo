@@ -455,8 +455,8 @@ export default function Diagram({ src }: { src: string }): ReactNode {
   if (out.own) {
     return (
       <div className="mt-3">
-        <div ref={card} className="relative w-max max-w-full">
-          {tools(false)}
+        <div ref={card} className="w-max max-w-full">
+          {tools("above")}
           <MermaidSvg svg={out.svg} title={title} />
           {full && (
             <DiagramView
@@ -475,7 +475,7 @@ export default function Diagram({ src }: { src: string }): ReactNode {
       ref={card}
       className="relative mt-3 rounded-ui-sm border border-border bg-panel p-3"
     >
-      {tools(true)}
+      {tools("over")}
       <MermaidSvg svg={out.svg} title={title} />
       {full && (
         <DiagramView src={src} svg={out.svg} onClose={() => setFull(false)} />
@@ -485,12 +485,19 @@ export default function Diagram({ src }: { src: string }): ReactNode {
 
   /** tools is the full view and the file. Always drawn, never revealed on
    * hover: a phone has no hover, and the full view is the only way it can
-   * see a wide diagram whole. On the renderer's drawing they sit on a fade
-   * of the card; on rongo's they sit in its canvas margin, which is clear. */
-  function tools(fade: boolean) {
+   * see a wide diagram whole. On the renderer's drawing they sit over the
+   * card on a fade of it. On rongo's they sit in a row above the canvas,
+   * flush with its right edge: inside it they covered a sequence's last
+   * participant at inline scale, and a band kept clear for them went into
+   * every file and full view, where there are no buttons. */
+  function tools(place: "over" | "above") {
     return (
       <div
-        className={`absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 ${fade ? "bg-gradient-to-l from-panel from-70% to-transparent pl-6" : ""}`}
+        className={
+          place === "over"
+            ? "absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 bg-gradient-to-l from-panel from-70% to-transparent pl-6"
+            : "mb-1 flex items-center justify-end gap-0.5"
+        }
       >
         <button
           type="button"

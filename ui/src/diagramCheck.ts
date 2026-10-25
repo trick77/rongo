@@ -2,6 +2,7 @@ import type { FlowLayout, NodeBox, Point } from "./diagramLayout";
 import { titleRoom } from "./diagramLayout";
 import {
   boxPad,
+  nestInset,
   notePad,
   type SeqLifeline,
   type SequenceLayout,
@@ -113,8 +114,8 @@ export function check(l: FlowLayout): string[] {
  * one another or on a box, a loop's text and a note beside a lifeline
  * clear of every other lifeline (a message's text crossing one is masked
  * by its ground, a loop's is not), every frame wide enough for its title,
- * its dividers clear of the text above them, apart from the next frame,
- * and nothing past the canvas. */
+ * its dividers clear of the text above them, any other frame either apart
+ * from it or inset inside it, and nothing past the canvas. */
 export function checkSequence(l: SequenceLayout): string[] {
   const out: string[] = [];
   for (const a of l.actors) {
@@ -163,9 +164,23 @@ export function checkSequence(l: SequenceLayout): string[] {
       if (above.some((r) => d.y < r.y + r.h + 2))
         out.push(`frame ${i} divider ${j}: runs into the text above it`);
     });
-    for (const g of l.frames.slice(i + 1)) {
-      if (overlaps(f, g)) out.push(`frame ${i}: overlaps another frame`);
-    }
+    // A later frame either clears this one or sits inside it: inset on
+    // every side, and clear of its dividers and of the title and divider
+    // texts painted over every frame. Frames open in source order, so a
+    // frame inside comes after the one holding it.
+    l.frames.slice(i + 1).forEach((g, k) => {
+      if (!overlaps(f, g)) return;
+      const name = `frame ${i + 1 + k}`;
+      if (!contains(inset(f, nestInset), g)) {
+        out.push(`${name}: overlaps frame ${i} without sitting inside it`);
+        return;
+      }
+      if (f.dividers.some((d) => d.y >= g.y && d.y <= g.y + g.h))
+        out.push(`${name}: a divider of frame ${i} runs through it`);
+      const above = [f.title, ...f.dividers.flatMap((d) => d.label ?? [])];
+      if (above.some((r) => overlaps(r, g)))
+        out.push(`${name}: runs under a text of frame ${i}`);
+    });
   });
   l.notes.forEach((n, i) => {
     texts.push({ name: `note ${i}`, r: n });
@@ -199,6 +214,16 @@ export function checkSequence(l: SequenceLayout): string[] {
       out.push(`a box at ${r.x},${r.y} runs past the canvas`);
   }
   return out;
+}
+
+/** contains says r lies wholly inside outer. */
+function contains(outer: Rect, r: Rect): boolean {
+  return (
+    r.x >= outer.x &&
+    r.y >= outer.y &&
+    r.x + r.w <= outer.x + outer.w &&
+    r.y + r.h <= outer.y + outer.h
+  );
 }
 
 function spansLifeline(r: Rect, ln: SeqLifeline): boolean {

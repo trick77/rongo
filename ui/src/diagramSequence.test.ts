@@ -167,6 +167,48 @@ describe("layoutSequence", () => {
     expect(checkSequence(l)).toEqual([]);
   });
 
+  it("draws a frame inside a frame inset in it, painted after it", () => {
+    const l = layoutSequence(
+      seq(actors("a", "b", "c"), [
+        { type: "frame", keyword: "loop", label: "until delivered" },
+        msg("a", "b", "stream"),
+        { type: "frame", keyword: "alt", label: "nothing delivered" },
+        msg("b", "a", "error", { line: "dashed" }),
+        { type: "divider", keyword: "else", label: "delivered" },
+        msg("b", "a", "tokens", { line: "dashed" }),
+        { type: "end" },
+        { type: "divider", keyword: "else", label: "gave up" },
+        msg("a", "c", "fail"),
+        { type: "end" },
+      ]),
+    );
+    const [outer, inner] = l.frames;
+    expect(outer.cond).toEqual(["until delivered"]);
+    expect(inner.cond).toEqual(["nothing delivered"]);
+    expect(inner.x).toBeGreaterThan(outer.x);
+    expect(inner.y).toBeGreaterThan(outer.title.y + outer.title.h);
+    expect(inner.x + inner.w).toBeLessThan(outer.x + outer.w);
+    expect(inner.y + inner.h).toBeLessThan(outer.dividers[0].y);
+    expect(l.messages.every((m) => m.framed)).toBe(true);
+    expect(checkSequence(l)).toEqual([]);
+  });
+
+  it("keeps an empty frame inside another from stretching it", () => {
+    const l = layoutSequence(
+      seq(actors("a", "b", "c", "d"), [
+        { type: "frame", keyword: "loop", label: "x" },
+        msg("a", "b", "q"),
+        { type: "frame", keyword: "opt", label: "z" },
+        { type: "end" },
+        { type: "end" },
+      ]),
+    );
+    const [outer, inner] = l.frames;
+    expect(outer.x + outer.w).toBeLessThan(lifeline(l, "c"));
+    expect(inner.x + inner.w).toBeLessThan(outer.x + outer.w);
+    expect(checkSequence(l)).toEqual([]);
+  });
+
   it("widens a frame to its title", () => {
     const l = layoutSequence(
       seq(actors("a", "b"), [
@@ -231,11 +273,6 @@ describe("layoutSequence", () => {
     }
   });
 
-  it("leaves the canvas's top right corner clear for the card's buttons", () => {
-    const l = layoutSequence(seq(actors("a", "b"), [msg("a", "b", "x")]));
-    for (const a of l.actors) expect(a.y).toBeGreaterThanOrEqual(56);
-  });
-
   it("sets a participant named like code in the mono", () => {
     const l = layoutSequence(
       seq(
@@ -277,6 +314,55 @@ describe("checkSequence", () => {
     const out = checkSequence(l);
     expect(out.some((s) => s.includes("crosses b's lifeline"))).toBe(true);
     expect(out.some((s) => s.includes("runs into the text above"))).toBe(true);
+  });
+
+  it("says when a frame overlaps another without sitting inside it", () => {
+    const l = layoutSequence(
+      seq(actors("a", "b"), [
+        { type: "frame", keyword: "loop", label: "" },
+        msg("a", "b", "x"),
+        { type: "end" },
+        { type: "frame", keyword: "opt", label: "" },
+        msg("a", "b", "y"),
+        { type: "end" },
+      ]),
+    );
+    l.frames[1].y = l.frames[0].y + 4;
+    expect(
+      checkSequence(l).some((s) => s.includes("without sitting inside")),
+    ).toBe(true);
+  });
+
+  it("says when a frame inside another runs under its title or a divider's text", () => {
+    const nested = () =>
+      layoutSequence(
+        seq(actors("a", "b", "c"), [
+          { type: "frame", keyword: "alt", label: "ok" },
+          msg("a", "b", "x"),
+          { type: "divider", keyword: "else", label: "failed" },
+          { type: "frame", keyword: "opt", label: "retry" },
+          msg("a", "b", "y"),
+          { type: "end" },
+          { type: "end" },
+        ]),
+      );
+    expect(checkSequence(nested())).toEqual([]);
+    const l = nested();
+    const [outer, inner] = l.frames;
+    const label = outer.dividers[0].label!;
+    inner.h += inner.y - (label.y + 2);
+    inner.y = label.y + 2;
+    expect(
+      checkSequence(l).some((s) => s.includes("runs under a text of frame 0")),
+    ).toBe(true);
+    // Inset from the frame's top, still under the title's last line.
+    const m = nested();
+    const title = m.frames[0].title;
+    m.frames[1].h += m.frames[1].y - (title.y + title.h - 6);
+    m.frames[1].y = title.y + title.h - 6;
+    expect(
+      checkSequence(m).some((s) => s.includes("runs under a text of frame 0")),
+    ).toBe(true);
   });
 
   it("says when a self message's text crosses a lifeline", () => {

@@ -259,6 +259,8 @@ const dividers: Record<number, string> = {
   28: "option",
 };
 const ends = new Set([11, 14, 16, 21, 29, 31]);
+/** How deep frames may sit inside one another. */
+const maxDepth = 3;
 /** activate and deactivate: a bar on the lifeline, which this does not
  * draw, and nothing else changes. */
 const ignored = new Set([17, 18]);
@@ -287,7 +289,7 @@ function sequenceIR(db: unknown): SequenceIR | null {
   if (actors.length === 0) return null;
   const known = new Set(actors.map((a) => a.id));
   const rows: SeqRow[] = [];
-  let open = false;
+  let depth = 0;
   for (const m of db.getMessages()) {
     const t = m.type ?? -1;
     const label = plain(typeof m.message === "string" ? m.message : "");
@@ -307,17 +309,16 @@ function sequenceIR(db: unknown): SequenceIR | null {
       const side = sides[m.placement ?? 2] ?? "over";
       rows.push({ type: "note", from: m.from!, to: m.to!, side, label });
     } else if (t in frames) {
-      // A frame inside a frame nests, and nesting is a picture this does
-      // not draw.
-      if (open) return null;
-      open = true;
+      // A frame inside a frame is drawn inset in it. Deeper than a few the
+      // insets eat the columns, and the renderer's drawing is no worse.
+      if (++depth > maxDepth) return null;
       rows.push({ type: "frame", keyword: frames[t], label });
     } else if (t in dividers) {
-      if (!open) return null;
+      if (depth === 0) return null;
       rows.push({ type: "divider", keyword: dividers[t], label });
     } else if (ends.has(t)) {
-      if (!open) return null;
-      open = false;
+      if (depth === 0) return null;
+      depth--;
       rows.push({ type: "end" });
     } else if (t === autonumber) {
       const on = (m.message as { visible?: unknown } | undefined)?.visible;
@@ -327,7 +328,7 @@ function sequenceIR(db: unknown): SequenceIR | null {
       return null;
     }
   }
-  if (open) return null;
+  if (depth !== 0) return null;
   return { kind: "sequence", actors, rows };
 }
 
