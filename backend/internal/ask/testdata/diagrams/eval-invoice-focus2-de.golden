@@ -1,0 +1,15 @@
+Der Bestelldienst berechnet den Betrag selbst, aus den Positionen des Warenkorbs und den Versandkosten [1][2].
+
+```mermaid
+flowchart TD
+    a["Auftragseingang prüfen"] --> b["Positionen aus Warenkorb laden"]
+    b --> c["Betrag berechnen"]:::focus
+    c --> d["Betrag an Zahlungsdienst senden"]
+    d{"Zahlung erlaubt?"}:::focus
+    d -- "ja" --> e["Versand beauftragen"]
+    e --> f["Auftrag mit Betrag speichern"]
+    d -- "nein" --> g["Auftrag abgelehnt"]
+:::focus
+```
+
+Erst nach der Autorisierung wird der Auftrag gespeichert [2].

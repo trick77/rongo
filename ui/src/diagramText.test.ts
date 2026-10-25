@@ -42,6 +42,9 @@ describe("dropStrayMarks", () => {
     expect(dropStrayMarks("sequenceDiagram\n  A->>B: :::x")).toBe(
       "sequenceDiagram\n  A->>B: :::x",
     );
+    // In a mindmap a mark on the line after a node is that node's class.
+    const mind = "mindmap\n  root\n    Urgent\n    :::urgent";
+    expect(dropStrayMarks(mind)).toBe(mind);
   });
 });
 

@@ -5,6 +5,7 @@ import {
   type FlowKind,
 } from "./diagram";
 import { fenceRe } from "./markdown";
+import { dropStrayMarks } from "./diagramText";
 
 /**
  * Taking a diagram out of rongo: as a standalone .svg file, and as mermaid
@@ -308,17 +309,18 @@ export function toMermaid(spec: DiagramSpec): string {
   return out.join("\n");
 }
 
-/** mermaidize rewrites the older diagram fences in an answer for the
- * clipboard: a JSON spec becomes mermaid text, and a `diagram` tag over
- * mermaid text (which diagram.tsx draws) becomes the `mermaid` tag every
- * other renderer knows. */
+/** mermaidize rewrites the diagram fences in an answer for the clipboard:
+ * a JSON spec becomes mermaid text, a `diagram` tag over mermaid text
+ * (which diagram.tsx draws) becomes the `mermaid` tag every other renderer
+ * knows, and a stray class mark is dropped as draw() drops it
+ * (dropStrayMarks): another renderer refuses the whole fence over it. */
 export function mermaidize(text: string): string {
   const lines = text.split("\n");
   const out: string[] = [];
   let i = 0;
   while (i < lines.length) {
     const fence = fenceRe.exec(lines[i]);
-    if (!fence || fence[1] !== "diagram") {
+    if (!fence || (fence[1] !== "diagram" && fence[1] !== "mermaid")) {
       out.push(lines[i++]);
       continue;
     }
@@ -331,10 +333,16 @@ export function mermaidize(text: string): string {
       out.push(open, ...body);
       continue;
     }
+    if (fence[1] === "mermaid") {
+      out.push(open, ...dropStrayMarks(body.join("\n")).split("\n"), "```");
+      continue;
+    }
     const spec = parseDiagram(body.join("\n"));
     out.push(
       "```mermaid",
-      ...(spec ? toMermaid(spec).split("\n") : body),
+      ...(spec
+        ? toMermaid(spec).split("\n")
+        : dropStrayMarks(body.join("\n")).split("\n")),
       "```",
     );
   }

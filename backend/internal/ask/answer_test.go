@@ -369,6 +369,14 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 		if !strings.Contains(p, `}:::focus`) || !strings.Contains(p, "one or two nodes the question is about") {
 			t.Errorf("the %s prompt does not ask for the focus mark", name)
 		}
+		// A model copies the prompt's layout: with the rule wrapped so a line
+		// opened on the mark, it wrote the mark on a line of its own, which the
+		// renderer refuses whole.
+		for _, line := range strings.Split(p, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), ":::") {
+				t.Errorf("the %s prompt opens a line on a class mark: %q", name, line)
+			}
+		}
 	}
 	// The diagram rule follows the audience block, so "the audience rules
 	// above" are the ones the model just read.
