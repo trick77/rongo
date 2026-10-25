@@ -58,7 +58,7 @@ func endpointEnv(t *testing.T) map[string]bool {
 
 // composeEnv is mandatory too, but compose.yaml is its arbiter: it names the
 // Traefik Host rule and refuses `up` without it. rongo never reads it.
-var composeEnv = map[string]bool{"FQDN": true}
+var composeEnv = map[string]bool{"PUBLIC_FQDN": true}
 
 // The file drifted once already: settings that Load happily defaults stood
 // active next to real mandatory ones, and the section header was the only

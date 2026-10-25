@@ -28,7 +28,7 @@
 #      mkdir -p conf && cp repos.example.yaml conf/repos.yaml
 #
 # 3. Copy .env.example to .env and set at least:
-#      FQDN                    the hostname Traefik routes rongo on
+#      PUBLIC_FQDN             the hostname Traefik routes rongo on
 #      BACKEND_AUTH_MODE      "oidc" in production. "dev" refuses to start on
 #                               the 0.0.0.0 address this file sets, since dev
 #                               mode auto-logs in an admin with no credentials.
@@ -147,7 +147,7 @@ services:
       # OIDC client and does its own login, like loom, music and peeq.
       traefik.enable: "true"
       traefik.docker.network: traefik
-      traefik.http.routers.rongo.rule: Host(`${FQDN:?set FQDN in .env, the hostname Traefik routes rongo on}`)
+      traefik.http.routers.rongo.rule: Host(`${PUBLIC_FQDN:?set PUBLIC_FQDN in .env, the hostname Traefik routes rongo on}`)
       traefik.http.routers.rongo.entrypoints: websecure
       # No certresolver — ark's Traefik has no ACME provider and serves the
       # certificate dumped by mailcowdockerized-certdumper-1.
