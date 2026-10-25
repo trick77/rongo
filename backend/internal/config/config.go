@@ -162,7 +162,7 @@ type Config struct {
 	AdminPasswordHash string
 	LogLevel          string
 	// The OIDC block, all required when AuthMode is oidc. The issuer carries no
-	// path and no trailing slash for Authelia (https://auth.trick77.com);
+	// path and no trailing slash for Authelia (https://auth.example.com);
 	// anything else fails discovery.
 	OIDCIssuer       string
 	OIDCClientID     string
