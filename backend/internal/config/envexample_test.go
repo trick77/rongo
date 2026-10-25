@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -55,14 +56,24 @@ func endpointEnv(t *testing.T) map[string]bool {
 	return names
 }
 
+// composeEnv is mandatory too, but compose.yaml is its arbiter: it names the
+// Traefik Host rule and refuses `up` without it. rongo never reads it.
+var composeEnv = map[string]bool{"FQDN": true}
+
 // The file drifted once already: settings that Load happily defaults stood
 // active next to real mandatory ones, and the section header was the only
 // thing saying which was which. Load is the arbiter, not the header, except
-// for the endpoints, whose arbiter is llmwire.
+// for the endpoints, whose arbiter is llmwire, and composeEnv.
 func TestEnvExample_activeLinesAreTheOnesLoadCannotDefault(t *testing.T) {
 	// Given a copy of .env.example with every mandatory value filled in
 	active := activeEnvExampleVars(t)
 	filled := mandatoryEnv
+	for name := range composeEnv {
+		if !slices.Contains(active, name) {
+			t.Errorf("%s is mandatory for compose.yaml but not active in .env.example", name)
+		}
+	}
+	active = slices.DeleteFunc(active, func(name string) bool { return composeEnv[name] })
 	for _, name := range active {
 		if _, ok := filled[name]; !ok {
 			t.Fatalf("%s is active in .env.example but this test has no value for it; "+
