@@ -15,7 +15,9 @@
  * as it always did.
  */
 
-export type FlowShape = "pill" | "step" | "decision";
+/** start and stop are a state diagram's `[*]`: a dot where it begins, a
+ * ringed dot where it ends. They carry no text. */
+export type FlowShape = "pill" | "step" | "decision" | "start" | "stop";
 export type FlowNodeIR = {
   id: string;
   label: string;
@@ -71,7 +73,31 @@ export type SequenceIR = {
   /** Top to bottom, in the order the source wrote them. */
   rows: SeqRow[];
 };
-export type DiagramIR = FlowIR | SequenceIR;
+/** How many of an entity sit at one end of a relationship. */
+export type Card = "one" | "zeroOrOne" | "oneOrMore" | "zeroOrMore";
+export type EntityIR = {
+  id: string;
+  label: string;
+  attrs: { type: string; name: string; keys: string[]; comment: string }[];
+  focus?: boolean;
+};
+export type RelIR = {
+  from: string;
+  to: string;
+  label: string;
+  /** The cardinality drawn at each end: fromCard at from's box. */
+  fromCard: Card;
+  toCard: Card;
+  /** Non-identifying, written `..`: dashed, never coloured. */
+  dashed: boolean;
+};
+export type ERIR = {
+  kind: "er";
+  direction: "TB" | "LR";
+  entities: EntityIR[];
+  rels: RelIR[];
+};
+export type DiagramIR = FlowIR | SequenceIR | ERIR;
 
 /** The largest diagram drawn editorially. The prompt asks for at most 12
  * nodes; past this the layout stops reading as composed, and the renderer's
@@ -91,8 +117,20 @@ export function fits(ir: DiagramIR): boolean {
     );
     return ir.actors.length <= maxActors && rows.length <= maxRows;
   }
+  if (ir.kind === "er")
+    return (
+      ir.entities.length <= maxEntities &&
+      ir.rels.length <= maxRels &&
+      ir.entities.every((e) => e.attrs.length <= maxAttrs)
+    );
   return ir.nodes.length <= maxNodes && ir.edges.length <= maxEdges;
 }
+
+/** An entity model's ceiling: tables are larger than steps, so fewer of
+ * them fit the answer's width before every field is too small to read. */
+const maxEntities = 8;
+const maxRels = 12;
+const maxAttrs = 12;
 
 /** toIR reads the db of a parsed diagram, or returns null for a kind or a
  * construct the drawing does not cover. */
@@ -100,6 +138,8 @@ export function toIR(type: string, db: unknown): DiagramIR | null {
   try {
     if (type === "flowchart-v2" || type === "flowchart") return flowIR(db);
     if (type === "sequence") return sequenceIR(db);
+    if (type === "stateDiagram" || type === "state") return stateIR(db);
+    if (type === "er") return erIR(db);
   } catch {
     // A db missing an accessor this reads is a renderer that moved on; the
     // renderer then draws the source itself.
@@ -330,6 +370,190 @@ function sequenceIR(db: unknown): SequenceIR | null {
   }
   if (depth !== 0) return null;
   return { kind: "sequence", actors, rows };
+}
+
+type StateDb = {
+  getData(): {
+    nodes: {
+      id: string;
+      label?: string;
+      shape?: string;
+      isGroup?: boolean;
+      parentId?: string;
+      cssClasses?: string;
+    }[];
+    edges: { start: string; end: string; label?: string; classes?: string }[];
+  };
+  getDirection(): string | undefined;
+};
+
+function isStateDb(db: unknown): db is StateDb {
+  if (typeof db !== "object" || db === null) return false;
+  const d = db as Record<string, unknown>;
+  return ["getData", "getDirection"].every((k) => typeof d[k] === "function");
+}
+
+/** The state shapes drawn, as the flow shape they draw as. A choice is a
+ * decision with no text: the condition is on the transitions out of it. */
+const stateShapes: Record<string, FlowShape> = {
+  rect: "step",
+  stateStart: "start",
+  stateEnd: "stop",
+  choice: "decision",
+};
+
+/** stateIR reads a state diagram as a flow: a state is a step, `[*]` a
+ * start or a stop, a transition an arrow with its event as the label.
+ * Composite states, notes, forks and joins and concurrent regions are
+ * pictures this does not draw; the renderer does. */
+function stateIR(db: unknown): FlowIR | null {
+  if (!isStateDb(db)) return null;
+  const dir = db.getDirection() ?? "TB";
+  if (dir !== "TB" && dir !== "LR") return null;
+  const data = db.getData();
+  const nodes: FlowNodeIR[] = [];
+  const known = new Set<string>();
+  for (const n of data.nodes) {
+    if (n.isGroup || n.parentId !== undefined) return null;
+    const shape = stateShapes[n.shape ?? ""];
+    if (shape === undefined) return null;
+    if (typeof n.id !== "string" || n.id === "" || known.has(n.id)) continue;
+    known.add(n.id);
+    const label =
+      shape === "start" || shape === "stop" || shape === "decision"
+        ? ""
+        : unquote(plain(n.label ?? "")) || n.id;
+    const node: FlowNodeIR = { id: n.id, label, shape };
+    if ((n.cssClasses ?? "").split(/\s+/).includes("focus")) node.focus = true;
+    nodes.push(node);
+  }
+  if (nodes.length === 0) return null;
+  const edges: FlowEdgeIR[] = [];
+  for (const e of data.edges) {
+    if (!known.has(e.start) || !known.has(e.end)) continue;
+    edges.push({
+      from: e.start,
+      to: e.end,
+      label: unquote(plain(e.label ?? "")),
+      dashed: false,
+      head: "end",
+    });
+  }
+  return {
+    kind: "flow",
+    direction: dir === "LR" ? "LR" : "TB",
+    nodes,
+    edges,
+    zones: [],
+  };
+}
+
+/** unquote drops a pair of double quotes around a whole state or transition
+ * label. The prompt asks for every flowchart label in quotes, where they are
+ * syntax, and a model carries the habit into a state diagram, where the
+ * grammar takes them as text: every transition read `"URL provided"`. */
+function unquote(s: string): string {
+  const m = /^"(.*)"$/s.exec(s);
+  return m ? m[1] : s;
+}
+
+type ErDb = {
+  getEntities(): Map<
+    string,
+    {
+      id: string;
+      label?: string;
+      alias?: string;
+      cssClasses?: string;
+      attributes?: {
+        type?: string;
+        name?: string;
+        keys?: string[];
+        comment?: string;
+      }[];
+    }
+  >;
+  getRelationships(): {
+    entityA: string;
+    entityB: string;
+    roleA?: string;
+    relSpec?: { cardA?: string; cardB?: string; relType?: string };
+  }[];
+  getDirection(): string | undefined;
+  getSubGraphs?(): unknown[];
+};
+
+function isErDb(db: unknown): db is ErDb {
+  if (typeof db !== "object" || db === null) return false;
+  const d = db as Record<string, unknown>;
+  return ["getEntities", "getRelationships", "getDirection"].every(
+    (k) => typeof d[k] === "function",
+  );
+}
+
+const cards: Record<string, Card> = {
+  ONLY_ONE: "one",
+  ZERO_OR_ONE: "zeroOrOne",
+  ONE_OR_MORE: "oneOrMore",
+  ZERO_OR_MORE: "zeroOrMore",
+};
+
+/** erIR reads an entity model: each entity with its fields, each
+ * relationship with its role and the cardinality at either end. A
+ * relationship's cardA is the one written at entityB's side (`A ||--o{ B`
+ * reads cardA "zero or more", cardB "only one"), so it is drawn at B. An
+ * entity related to itself, an unknown cardinality, a direction other than
+ * down or right and a subgraph grouping tables are pictures this does not
+ * draw. So is a relationship naming anything but an entity: dropped, the
+ * picture would leave a relationship out and say nothing. */
+function erIR(db: unknown): ERIR | null {
+  if (!isErDb(db)) return null;
+  const dir = db.getDirection() ?? "TB";
+  if (dir !== "TB" && dir !== "LR") return null;
+  if ((db.getSubGraphs?.() ?? []).length > 0) return null;
+  const entities: EntityIR[] = [];
+  const byKey = new Map<string, string>();
+  for (const [name, e] of db.getEntities()) {
+    if (typeof name !== "string" || name === "") continue;
+    byKey.set(e.id, name);
+    const entity: EntityIR = {
+      id: name,
+      label: plain(e.alias ?? "") || plain(e.label ?? "") || name,
+      attrs: (e.attributes ?? []).map((a) => ({
+        type: plain(a.type ?? ""),
+        name: plain(a.name ?? ""),
+        keys: a.keys ?? [],
+        comment: plain(a.comment ?? ""),
+      })),
+    };
+    if ((e.cssClasses ?? "").split(/\s+/).includes("focus"))
+      entity.focus = true;
+    entities.push(entity);
+  }
+  if (entities.length === 0) return null;
+  const rels: RelIR[] = [];
+  for (const r of db.getRelationships()) {
+    const from = byKey.get(r.entityA);
+    const to = byKey.get(r.entityB);
+    if (from === undefined || to === undefined || from === to) return null;
+    const toCard = cards[r.relSpec?.cardA ?? ""];
+    const fromCard = cards[r.relSpec?.cardB ?? ""];
+    if (toCard === undefined || fromCard === undefined) return null;
+    rels.push({
+      from,
+      to,
+      label: plain(r.roleA ?? ""),
+      fromCard,
+      toCard,
+      dashed: r.relSpec?.relType === "NON_IDENTIFYING",
+    });
+  }
+  return {
+    kind: "er",
+    direction: dir === "LR" ? "LR" : "TB",
+    entities,
+    rels,
+  };
 }
 
 function headOf(type: string): FlowEdgeIR["head"] {

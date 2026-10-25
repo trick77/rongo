@@ -1,0 +1,29 @@
+Every chunk belongs to one file, and a file to one repository [3][4].
+
+```mermaid
+erDiagram
+  REPOSITORY ||--o{ FILE : contains
+  FILE ||--|{ CHUNK : "is split into"
+  CHUNK }o..o| EMBEDDING : "reuses by hash"
+  REPOSITORY {
+    int id PK
+    string name "unique, never trimmed"
+    string last_sha
+  }
+  FILE {
+    int id PK
+    int repo_id FK
+    string path
+  }
+  CHUNK {
+    int id PK
+    int file_id FK
+    string content_hash
+  }
+  EMBEDDING {
+    string hash PK
+    blob vector
+  }
+```
+
+An embedding is shared by every chunk with the same content [4].

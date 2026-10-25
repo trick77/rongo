@@ -7,7 +7,8 @@ import { fenceRe } from "./markdown";
 import { fits, toIR, type DiagramIR } from "./diagramIR";
 import { layoutFlow } from "./diagramLayout";
 import { layoutSequence } from "./diagramSequence";
-import { check, checkSequence } from "./diagramCheck";
+import { check, checkER, checkSequence } from "./diagramCheck";
+import { layoutER } from "./diagramER";
 import { editorial } from "./editorial";
 
 /**
@@ -80,6 +81,14 @@ function labels(ir: DiagramIR): string[] {
       ...ir.actors.map((a) => a.label),
       ...ir.rows.map((r) => ("label" in r ? r.label : "")),
     ];
+  if (ir.kind === "er")
+    return [
+      ...ir.entities.flatMap((e) => [
+        e.label,
+        ...e.attrs.flatMap((a) => [a.type, a.name, a.comment]),
+      ]),
+      ...ir.rels.map((r) => r.label),
+    ];
   return [
     ...ir.nodes.map((n) => n.label),
     ...ir.edges.map((e) => e.label),
@@ -135,6 +144,10 @@ describe("rongo's drawing of the corpus", () => {
       if (ir === null || !fits(ir)) return;
       if (ir.kind === "sequence") {
         expect(checkSequence(layoutSequence(ir))).toEqual([]);
+        return;
+      }
+      if (ir.kind === "er") {
+        expect(checkER(await layoutER(ir, new ELK()))).toEqual([]);
         return;
       }
       expect(check(await layoutFlow(ir, new ELK()))).toEqual([]);

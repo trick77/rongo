@@ -8,6 +8,7 @@ import {
   layoutMapping,
   layoutSpine,
   looksLikeCode,
+  onCircle,
   onDiamond,
   tidy,
   type FlowLayout,
@@ -383,6 +384,113 @@ describe("tidy and onDiamond", () => {
     expect(onDiamond(d, { x: 100, y: 25 }, { x: 130, y: 25 })).toEqual({
       x: 100,
       y: 25,
+    });
+  });
+});
+
+describe("a state diagram's dots and choices", () => {
+  // The corpus's thread lifecycle: a start, three states, a skip ahead and a
+  // loop back, a stop.
+  const states = flow(
+    [
+      n("s", "", "start"),
+      n("draft", "Draft"),
+      n("shared", "Shared"),
+      n("archived", "Archived"),
+      n("t", "", "stop"),
+    ],
+    [
+      e("s", "draft"),
+      e("draft", "shared", "share()"),
+      e("shared", "draft", "unshare()"),
+      e("shared", "archived", "archive()"),
+      e("draft", "archived", "archive()"),
+      e("archived", "t"),
+    ],
+  );
+
+  it("draws [*] as small dots on the path, without text, and meets them square", () => {
+    const l = layoutSpine(states)!;
+    expect(l).not.toBeNull();
+    const s = box(l, "s");
+    const t = box(l, "t");
+    expect([s.kind, s.w, s.h, s.lines]).toEqual(["start", 16, 16, []]);
+    expect([t.kind, t.w, t.h]).toEqual(["stop", 20, 20]);
+    const draft = box(l, "draft");
+    expect(s.x + s.w / 2).toBe(draft.x + draft.w / 2);
+    expect(route(l, "shared", "draft").dashed).toBe(true);
+    expect(check(l)).toEqual([]);
+  });
+
+  it("lays a dot out by ELK, an edge ending on its outline", async () => {
+    const l = await layoutElk({ ...states, direction: "LR" }, new ELK());
+    const s = box(l, "s");
+    const end = route(l, "s", "draft").points[0];
+    const d = Math.hypot(end.x - (s.x + 8), end.y - (s.y + 8));
+    expect(Math.abs(d - 8)).toBeLessThanOrEqual(1.5);
+    expect(check(l)).toEqual([]);
+  });
+
+  it("draws a choice with no text as a small diamond", async () => {
+    const l = await layoutFlow(
+      flow(
+        [
+          n("a", "Fetching"),
+          n("c", "", "decision"),
+          n("b", "Indexing"),
+          n("f", "Failed"),
+        ],
+        [e("a", "c"), e("c", "b", "found"), e("c", "f", "missing")],
+      ),
+      new ELK(),
+    );
+    const c = box(l, "c");
+    expect([c.kind, c.w, c.h]).toEqual(["decision", 28, 28]);
+    expect(check(l)).toEqual([]);
+  });
+
+  it("says when an edge misses a dot", () => {
+    const l = layoutSpine(states)!;
+    route(l, "s", "draft").points[0].x += 30;
+    route(l, "s", "draft").points[1].x += 30;
+    expect(check(l).some((m) => m.includes("misses s"))).toBe(true);
+  });
+});
+
+describe("onCircle", () => {
+  const dot = {
+    id: "d",
+    kind: "start" as const,
+    lines: [],
+    face: "sans" as const,
+    size: 13,
+    bold: false,
+    focus: false,
+    x: 0,
+    y: 0,
+    w: 20,
+    h: 20,
+  };
+
+  it("moves an end on a dot's box onto its circle, along its segment", () => {
+    expect(onCircle(dot, { x: 10, y: 20 }, { x: 10, y: 50 })).toEqual({
+      x: 10,
+      y: 20,
+    });
+    expect(onCircle(dot, { x: 16, y: 20 }, { x: 16, y: 50 })).toEqual({
+      x: 16,
+      y: 18,
+    });
+    expect(onCircle(dot, { x: 20, y: 10 }, { x: 60, y: 10 })).toEqual({
+      x: 20,
+      y: 10,
+    });
+  });
+
+  it("leaves an end beside the circle where it is", () => {
+    expect(onCircle(dot, { x: 20, y: 0 }, { x: 20, y: -30 })).toEqual({
+      x: 20,
+      y: 0,
     });
   });
 });

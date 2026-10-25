@@ -17,6 +17,14 @@ import {
   type TextBlock,
 } from "./diagramSequence";
 import { ramp, textWidth, type Palette } from "./diagramTheme";
+import type { Card } from "./diagramIR";
+import {
+  rowLine,
+  rowPad,
+  tablePad,
+  type ERLayout,
+  type Table,
+} from "./diagramER";
 
 /**
  * A layout written as SVG, in the reference design's vocabulary: a canvas in
@@ -194,6 +202,167 @@ export function drawSequence(
         : "",
     ),
   ]);
+}
+
+/** drawER writes an entity model: tables framed as boxes are, their name
+ * in a tinted head, fields in the mono with types and keys in the muted;
+ * relationships in the muted line, a non-identifying one dashed (never
+ * coloured: here a dash is a kind of relationship, not a boundary), each
+ * end marked with its cardinality, crow's foot for many, bar for one,
+ * ring for zero.
+ *
+ * Paint order: canvas, lines, marks, roles, tables. The marks are drawn,
+ * not markers, so no id is needed. */
+export function drawER(l: ERLayout, pal: Palette): string {
+  return svg(l.width, l.height, pal, "", [
+    ...l.edges.map((e) =>
+      el("polyline", {
+        points: e.points.map((p) => `${f(p.x)},${f(p.y)}`).join(" "),
+        fill: "none",
+        stroke: pal.muted,
+        "stroke-width": 1.4,
+        "stroke-dasharray": e.dashed ? "5 4" : undefined,
+      }),
+    ),
+    ...l.edges.map((e, i) =>
+      e.points.length < 2
+        ? ""
+        : mark(e.points[0], e.points[1], l.cards[i].from, pal) +
+          mark(
+            e.points[e.points.length - 1],
+            e.points[e.points.length - 2],
+            l.cards[i].to,
+            pal,
+          ),
+    ),
+    ...l.edges.map((e) => (e.label ? label(e.label, pal.muted, pal) : "")),
+    ...l.nodes.map((n) => entity(n, l.tables.get(n.id)!, pal)),
+  ]);
+}
+
+/** mark is a cardinality at the end of a line that meets a table at end,
+ * the line running on towards next: bars for exactly one, a ring for zero,
+ * a crow's foot spread against the table for many. */
+function mark(end: Point, next: Point, card: Card, pal: Palette): string {
+  const len = Math.hypot(next.x - end.x, next.y - end.y) || 1;
+  const u = { x: (next.x - end.x) / len, y: (next.y - end.y) / len };
+  const v = { x: -u.y, y: u.x };
+  const at = (s: number, t = 0) => ({
+    x: end.x + u.x * s + v.x * t,
+    y: end.y + u.y * s + v.y * t,
+  });
+  const stroke = { stroke: pal.muted, "stroke-width": 1.4, fill: "none" };
+  const seg = (a: Point, b: Point) =>
+    el("line", { x1: f(a.x), y1: f(a.y), x2: f(b.x), y2: f(b.y), ...stroke });
+  const bar = (s: number) => seg(at(s, -6), at(s, 6));
+  const ring = (s: number) => {
+    const c = at(s);
+    return el("circle", {
+      cx: f(c.x),
+      cy: f(c.y),
+      r: 4,
+      fill: pal.surface,
+      stroke: pal.muted,
+      "stroke-width": 1.2,
+    });
+  };
+  const foot = () => seg(at(12), at(0, -7)) + seg(at(12), at(0, 7));
+  switch (card) {
+    case "one":
+      return bar(8) + bar(13);
+    case "zeroOrOne":
+      return bar(8) + ring(17);
+    case "oneOrMore":
+      return foot() + bar(16);
+    case "zeroOrMore":
+      return foot() + ring(18);
+  }
+}
+
+/** entity is a table: the frame of a box, a head in the tint under a
+ * hairline, and a row per field, the columns as the layout lined them up. */
+function entity(n: NodeBox, t: Table, pal: Palette): string {
+  const stroke = n.focus ? pal.accent : pal.line;
+  const width = n.focus ? 2 : 1.2;
+  const r = 6;
+  const head =
+    t.rows.length === 0
+      ? ""
+      : el("path", {
+          d: `M${f(n.x)},${f(n.y + t.head)} V${f(n.y + r)} Q${f(n.x)},${f(n.y)} ${f(n.x + r)},${f(n.y)} H${f(n.x + n.w - r)} Q${f(n.x + n.w)},${f(n.y)} ${f(n.x + n.w)},${f(n.y + r)} V${f(n.y + t.head)} Z`,
+          fill: pal.tint,
+        }) +
+        el("line", {
+          x1: f(n.x),
+          y1: f(n.y + t.head),
+          x2: f(n.x + n.w),
+          y2: f(n.y + t.head),
+          stroke: pal.line,
+          "stroke-width": 1,
+        });
+  const first =
+    n.y + t.head / 2 - ((t.name.lines.length - 1) * ramp.lineHeight) / 2;
+  const name = t.name.lines
+    .map((line, i) =>
+      el(
+        "text",
+        {
+          x: f(n.x + tablePad),
+          y: f(first + i * ramp.lineHeight),
+          fill: pal.fg,
+          "font-family": t.name.face === "mono" ? pal.mono : undefined,
+          "font-size": t.name.size,
+          "font-weight": t.name.bold ? 600 : undefined,
+          "dominant-baseline": "central",
+        },
+        esc(line),
+      ),
+    )
+    .join("");
+  const rows = t.rows
+    .map((row) =>
+      row.cells
+        .map((c) =>
+          c.text
+            .map((line, i) =>
+              el(
+                "text",
+                {
+                  x: f(n.x + c.x),
+                  y: f(n.y + row.y + rowPad / 2 + i * rowLine + rowLine / 2),
+                  fill: c.muted ? pal.muted : pal.fg,
+                  "font-family": c.face === "mono" ? pal.mono : undefined,
+                  "font-size": c.size,
+                  "dominant-baseline": "central",
+                },
+                esc(line),
+              ),
+            )
+            .join(""),
+        )
+        .join(""),
+    )
+    .join("");
+  // The frame last, over the head's fill, so its corners stay crisp.
+  const box = el("rect", {
+    x: n.x,
+    y: n.y,
+    width: n.w,
+    height: n.h,
+    rx: r,
+    fill: "none",
+    stroke,
+    "stroke-width": width,
+  });
+  const ground = el("rect", {
+    x: n.x,
+    y: n.y,
+    width: n.w,
+    height: n.h,
+    rx: r,
+    fill: pal.surface,
+  });
+  return ground + head + name + rows + box;
 }
 
 function frame(fr: SeqFrame, pal: Palette): string {
@@ -480,6 +649,24 @@ function label(m: LabelBox, fill: string, pal: Palette): string {
 }
 
 function node(n: NodeBox, pal: Palette): string {
+  // A state diagram's `[*]`: where it begins a dot in the text colour,
+  // where it ends the same dot in a ring. No text and no focus to carry.
+  if (n.kind === "start" || n.kind === "stop") {
+    const cx = f(n.x + n.w / 2);
+    const cy = f(n.y + n.h / 2);
+    const r = n.w / 2;
+    if (n.kind === "start") return el("circle", { cx, cy, r, fill: pal.fg });
+    return (
+      el("circle", {
+        cx,
+        cy,
+        r: r - 0.7,
+        fill: pal.surface,
+        stroke: pal.fg,
+        "stroke-width": 1.4,
+      }) + el("circle", { cx, cy, r: r - 5, fill: pal.fg })
+    );
+  }
   // The focus is framed in the accent at twice the weight, the reference's way
   // of marking the steps the page is about.
   const stroke = n.focus ? pal.accent : pal.line;

@@ -1,6 +1,12 @@
 import { beforeAll, describe, it, expect } from "vitest";
 import mermaid from "mermaid";
-import { toIR, fits, type FlowIR, type SequenceIR } from "./diagramIR";
+import {
+  toIR,
+  fits,
+  type ERIR,
+  type FlowIR,
+  type SequenceIR,
+} from "./diagramIR";
 
 // The renderer registers its diagram types on initialize; diagram.tsx does
 // the same before its first parse.
@@ -354,6 +360,145 @@ describe("fits a sequence", () => {
   });
 });
 
+describe("toIR for a state diagram", () => {
+  it("reads states as steps, [*] as a start and a stop, transitions as labelled arrows", async () => {
+    const f = await flow(`stateDiagram-v2
+  [*] --> Draft
+  Draft --> Shared : share()
+  state check <<choice>>
+  Shared --> check
+  check --> Archived : old
+  Archived --> [*]
+  Draft : a draft #lt;T#gt;
+  class Shared focus`);
+    expect(f.direction).toBe("TB");
+    expect(f.nodes.map((n) => [n.id, n.label, n.shape])).toEqual([
+      ["root_start", "", "start"],
+      ["Draft", "a draft <T>", "step"],
+      ["Shared", "Shared", "step"],
+      ["check", "", "decision"],
+      ["Archived", "Archived", "step"],
+      ["root_end", "", "stop"],
+    ]);
+    expect(f.nodes.find((n) => n.id === "Shared")!.focus).toBe(true);
+    expect(f.edges.map((e) => [e.from, e.to, e.label])).toEqual([
+      ["root_start", "Draft", ""],
+      ["Draft", "Shared", "share()"],
+      ["Shared", "check", ""],
+      ["check", "Archived", "old"],
+      ["Archived", "root_end", ""],
+    ]);
+    expect(f.zones).toEqual([]);
+  });
+
+  it("drops the quotes a model writes around a whole label, keeps quotes inside one", async () => {
+    const f = await flow(`stateDiagram-v2
+  [*] --> A : "URL provided"
+  A : "Request built"
+  A --> B : say #quot;hi#quot; now`);
+    expect(f.nodes.find((n) => n.id === "A")!.label).toBe("Request built");
+    expect(f.edges.map((e) => e.label)).toEqual([
+      "URL provided",
+      'say "hi" now',
+    ]);
+  });
+
+  it("keeps a left-to-right state diagram left to right", async () => {
+    const f = await flow("stateDiagram-v2\n  direction LR\n  a --> b");
+    expect(f.direction).toBe("LR");
+  });
+
+  it("declines composite states, notes and forks", async () => {
+    const declined = [
+      "state Outer {\n    [*] --> In\n  }",
+      "a --> b\n  note right of a : n",
+      "state f <<fork>>\n  a --> f",
+    ];
+    for (const body of declined)
+      expect(await ir(`stateDiagram-v2\n  ${body}`), body).toBeNull();
+  });
+});
+
+describe("toIR for an entity model", () => {
+  it("reads entities with their fields and relationships with both cardinalities", async () => {
+    const out = await ir(`erDiagram
+  THREAD ||--o{ MESSAGE : holds
+  MESSAGE }|..|{ CITATION : cites
+  THREAD ||--o| SHARE : "is shared as"
+  THREAD {
+    int id PK
+    string title "the name"
+  }
+  MESSAGE["Message #lt;row#gt;"] {
+    int ordinal
+  }
+  SHARE:::focus`);
+    expect(out?.kind).toBe("er");
+    const e = out as ERIR;
+    expect(e.entities.map((x) => [x.id, x.label, x.focus ?? false])).toEqual([
+      ["THREAD", "THREAD", false],
+      ["MESSAGE", "Message <row>", false],
+      ["CITATION", "CITATION", false],
+      ["SHARE", "SHARE", true],
+    ]);
+    expect(e.entities[0].attrs).toEqual([
+      { type: "int", name: "id", keys: ["PK"], comment: "" },
+      { type: "string", name: "title", keys: [], comment: "the name" },
+    ]);
+    expect(e.rels).toEqual([
+      {
+        from: "THREAD",
+        to: "MESSAGE",
+        label: "holds",
+        fromCard: "one",
+        toCard: "zeroOrMore",
+        dashed: false,
+      },
+      {
+        from: "MESSAGE",
+        to: "CITATION",
+        label: "cites",
+        fromCard: "oneOrMore",
+        toCard: "oneOrMore",
+        dashed: true,
+      },
+      {
+        from: "THREAD",
+        to: "SHARE",
+        label: "is shared as",
+        fromCard: "one",
+        toCard: "zeroOrOne",
+        dashed: false,
+      },
+    ]);
+  });
+
+  it("declines an entity related to itself", async () => {
+    expect(await ir("erDiagram\n  A ||--o{ A : parent")).toBeNull();
+  });
+
+  it("declines tables grouped in a subgraph rather than drop what joins it", async () => {
+    expect(
+      await ir(`erDiagram
+  subgraph Billing
+    INVOICE ||--o{ LINE : has
+  end
+  CUSTOMER ||--o{ Billing : owns`),
+    ).toBeNull();
+  });
+
+  it("fits up to eight entities", async () => {
+    const src = (n: number) =>
+      "erDiagram\n" +
+      Array.from(
+        { length: n - 1 },
+        (_, i) => `  E${i} ||--o{ E${i + 1} : r`,
+      ).join("\n");
+    expect(fits((await ir(src(8)))!)).toBe(true);
+    expect(fits((await ir(src(9)))!)).toBe(false);
+  });
+});
+
 describe("toIR for what it does not draw", () => {
   it("is null for a kind it has no drawer for", async () => {
     expect(
@@ -366,6 +511,8 @@ describe("toIR for what it does not draw", () => {
     expect(toIR("flowchart-v2", {})).toBeNull();
     expect(toIR("flowchart-v2", null)).toBeNull();
     expect(toIR("sequence", {})).toBeNull();
+    expect(toIR("stateDiagram", {})).toBeNull();
+    expect(toIR("er", {})).toBeNull();
   });
 });
 

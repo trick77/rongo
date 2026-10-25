@@ -1,6 +1,7 @@
 import { fits, toIR } from "./diagramIR";
 import { layoutFlow, type Elk } from "./diagramLayout";
-import { drawFlow, drawSequence } from "./diagramDraw";
+import { drawER, drawFlow, drawSequence } from "./diagramDraw";
+import { layoutER } from "./diagramER";
 import { layoutSequence } from "./diagramSequence";
 import { palette } from "./diagramTheme";
 
@@ -8,8 +9,8 @@ import { palette } from "./diagramTheme";
  * rongo's own drawing of a diagram source, or null when it has none and the
  * renderer should draw the source as it always did. Loaded by diagram.tsx
  * on the first fence, as its own chunk. The layout engine is a chunk of its
- * own again, loaded on the first flowchart: it is large, and a sequence
- * never uses it.
+ * own again, loaded on the first flowchart or entity model: it is large,
+ * and a sequence never uses it.
  */
 
 /** The part of the renderer this reads: its parse, as a type and a db. */
@@ -39,5 +40,6 @@ export async function editorial(
       throw e;
     },
   );
+  if (ir.kind === "er") return drawER(await layoutER(ir, await elk), palette());
   return drawFlow(await layoutFlow(ir, await elk), palette(), ids);
 }

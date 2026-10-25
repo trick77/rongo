@@ -1,0 +1,18 @@
+Ein Lauf endet entweder im Index oder in einem Fehler, den die Repos-Seite zeigt [1][2].
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> Pending
+  Pending --> Fetching : poll()
+  state ok <<choice>>
+  Fetching --> ok
+  ok --> Indexing : Branch vorhanden
+  ok --> Failed : Branch fehlt
+  Indexing --> Current : commit
+  Failed --> Pending : nächster Zyklus
+  Current --> [*]
+  class Failed focus
+```
+
+Ein fehlgeschlagener Lauf lässt `last_sha` stehen [2].
