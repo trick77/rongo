@@ -1,7 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import mermaid from "mermaid";
-import { diagramSource } from "./diagram";
+import ELK from "elkjs/lib/elk.bundled.js";
+import { diagramKind, diagramSource } from "./diagram";
 import { fenceRe } from "./markdown";
+import { fits, toIR } from "./diagramIR";
+import { layoutFlow } from "./diagramLayout";
+import { check } from "./diagramCheck";
+import { editorial } from "./editorial";
 
 /**
  * The other half of the diagram corpus. The .txt files are answers as models
@@ -54,6 +59,39 @@ describe("the diagram corpus", () => {
       expect(f, "the backend left no diagram fence").not.toBeNull();
       const ok = await mermaid.parse(f!.body, { suppressErrors: true });
       expect(ok, `the renderer refuses:\n${f!.body}`).toBeTruthy();
+    });
+  }
+});
+
+/** Which drawing each kind gets. A flowchart is rongo's own; every other
+ * kind is the renderer's until rongo draws it. Asserted per answer, so a
+ * flowchart that quietly falls back to the renderer fails here rather than
+ * looking like it always did. */
+const own = new Set(["flowchart", "graph"]);
+
+describe("rongo's drawing of the corpus", () => {
+  beforeAll(() => {
+    mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
+  });
+
+  for (const [path, text] of Object.entries(goldens)) {
+    const name = path.slice(path.lastIndexOf("/") + 1);
+    it(`draws ${name} with the drawing its kind gets`, async () => {
+      const src = fence(text)!.body;
+      const svg = await editorial(mermaid, src, "corpus");
+      if (own.has(diagramKind(src))) {
+        expect(svg, "rongo declined a flowchart").toMatch(/^<svg /);
+      } else {
+        expect(svg, "rongo drew a kind it has no drawing for").toBeNull();
+      }
+    });
+
+    it(`lays out ${name} by the connector rules`, async () => {
+      const src = fence(text)!.body;
+      const d = await mermaid.mermaidAPI.getDiagramFromText(src);
+      const ir = toIR(d.type, d.db);
+      if (ir === null || !fits(ir)) return;
+      expect(check(await layoutFlow(ir, new ELK()))).toEqual([]);
     });
   }
 });
