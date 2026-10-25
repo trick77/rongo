@@ -1059,33 +1059,6 @@ func (s *Store) PublicIDFor(ctx context.Context, id int64) (string, error) {
 	return publicID, nil
 }
 
-// BackfillPublicIDs mints an address for every thread that predates the
-// column, and is called once at boot, right after the migrations. It is in Go
-// rather than in 0010 because SQLite has no base64: a SQL backfill could only
-// write hex, and the whole point is an id shaped like the share token.
-//
-// Idempotent — a second run selects nothing — so a crash halfway leaves the
-// rows it did mint alone and finishes the rest next time.
-func (s *Store) BackfillPublicIDs(ctx context.Context) error {
-	// One row per statement, picked by the statement itself, rather than a
-	// cursor read into a slice and updated afterwards: each address has to be
-	// minted in Go anyway, so a list bought nothing but a second failure mode.
-	// It ends when nothing is left to name.
-	for {
-		publicID, err := newToken()
-		if err != nil {
-			return err
-		}
-		res, err := s.db.ExecContext(ctx,
-			`UPDATE threads SET public_id = ?
-			 WHERE id = (SELECT id FROM threads WHERE public_id = '' LIMIT 1)`, publicID)
-		named, err := sqlutil.Affected(res, err, "give a thread its address")
-		if err != nil || !named {
-			return err
-		}
-	}
-}
-
 // Owns reports whether the thread belongs to this subject.
 func (s *Store) Owns(ctx context.Context, subject string, threadID int64) (bool, error) {
 	var n int

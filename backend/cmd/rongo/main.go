@@ -188,16 +188,6 @@ func main() {
 	} else if n > 0 {
 		slog.Warn("marked turns left unfinished by the last shutdown as failed", "turns", n)
 	}
-	// Every thread needs an address before a single request is served: it is
-	// what /thread/… and every /api/threads/… path is written in, and a thread
-	// that predates the column has none. Fatal rather than best-effort — a
-	// thread with an empty public_id is a row the rail can render and nothing
-	// can open.
-	if err := threadStore.BackfillPublicIDs(ctx); err != nil {
-		slog.Error("give existing threads an address", "err", err)
-		os.Exit(1)
-	}
-
 	authSvc := auth.NewService(db, string(cfg.AuthMode), cfg.AdminToken)
 	// kit's signed cookie in the modes that sign in: the claims travel in it,
 	// so there is no session table and nothing to sweep.

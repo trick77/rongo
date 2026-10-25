@@ -89,52 +89,6 @@ func TestPublicIDFor_isTheWayBackFromARowID(t *testing.T) {
 	}
 }
 
-func TestBackfillPublicIDs_givesEveryOlderThreadAnAddressAndRunsTwiceSafely(t *testing.T) {
-	s, ctx, th, db := newThreadStore(t)
-	// Two threads as they looked before the column existed.
-	other, err := s.Create(ctx, testSubject, "andere frage")
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE threads SET public_id = '' WHERE id IN (?, ?)`, th, other.ID); err != nil {
-		t.Fatalf("clear addresses: %v", err)
-	}
-
-	if err := s.BackfillPublicIDs(ctx); err != nil {
-		t.Fatalf("backfill: %v", err)
-	}
-
-	list, err := s.List(ctx, testSubject)
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(list) != 2 {
-		t.Fatalf("threads = %+v, want two", list)
-	}
-	minted := map[string]bool{}
-	for _, tr := range list {
-		if !address.MatchString(tr.PublicID) {
-			t.Fatalf("thread %d was left without an address: %+v", tr.ID, tr)
-		}
-		minted[tr.PublicID] = true
-	}
-	if len(minted) != 2 {
-		t.Error("the backfill wrote the same address twice")
-	}
-
-	// A second run must leave what the first one minted alone: a URL handed out
-	// between two boots would otherwise stop working.
-	if err := s.BackfillPublicIDs(ctx); err != nil {
-		t.Fatalf("second backfill: %v", err)
-	}
-	again, _ := s.List(ctx, testSubject)
-	for i := range again {
-		if again[i].PublicID != list[i].PublicID {
-			t.Errorf("second run changed thread %d's address: %q -> %q", again[i].ID, list[i].PublicID, again[i].PublicID)
-		}
-	}
-}
-
 // A database that cannot be read is an ERROR on every one of these, never a
 // quiet "no such thread": the handler above turns the first into a 500 and the
 // second into a 404, and a locked database answering 404 would tell a reader
@@ -143,10 +97,6 @@ func TestPublicID_aShutDatabaseIsAnErrorNotASilentMiss(t *testing.T) {
 	s, ctx, th, db := newThreadStore(t)
 	list, _ := s.List(ctx, testSubject)
 	addr := list[0].PublicID
-	// A thread still waiting for its address, so the backfill has work to find.
-	if _, err := db.ExecContext(ctx, `UPDATE threads SET public_id = '' WHERE id = ?`, th); err != nil {
-		t.Fatalf("clear address: %v", err)
-	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close db: %v", err)
 	}
@@ -156,9 +106,6 @@ func TestPublicID_aShutDatabaseIsAnErrorNotASilentMiss(t *testing.T) {
 	}
 	if _, err := s.PublicIDFor(context.Background(), th); err == nil {
 		t.Error("public id for on a shut database reported no address instead of failing")
-	}
-	if err := s.BackfillPublicIDs(context.Background()); err == nil {
-		t.Error("backfill on a shut database reported success")
 	}
 	if _, err := s.Create(context.Background(), testSubject, "frage"); err == nil {
 		t.Error("create on a shut database reported success")
