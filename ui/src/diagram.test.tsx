@@ -35,6 +35,7 @@ import Diagram, {
   diagramSource,
   diagramTitle,
   draw,
+  escapeAngles,
   parseDiagram,
   themeVariables,
   type FlowSpec,
@@ -103,6 +104,32 @@ describe("rongo's own drawing", () => {
     expect(
       (card.parentElement as HTMLElement).getAttribute("style"),
     ).toBeNull();
+  });
+});
+
+describe("escapeAngles", () => {
+  it("keeps angle brackets in quoted labels as text, arrows and line breaks as they are", () => {
+    expect(
+      escapeAngles(
+        'flowchart LR\n  m2["Failed to fetch <url>: <cause>"]\n  a -->|"x <n> y"| b["one<br/>two"]',
+      ),
+    ).toBe(
+      'flowchart LR\n  m2["Failed to fetch #lt;url#gt;: #lt;cause#gt;"]\n  a -->|"x #lt;n#gt; y"| b["one<br/>two"]',
+    );
+  });
+
+  it("escapes a sequence message and a state label after the colon, never the arrow", () => {
+    expect(escapeAngles("sequenceDiagram\n  A->>B: List<Order> back")).toBe(
+      "sequenceDiagram\n  A->>B: List#lt;Order#gt; back",
+    );
+    expect(escapeAngles("stateDiagram-v2\n  A --> B : retries < 3")).toBe(
+      "stateDiagram-v2\n  A --> B : retries #lt; 3",
+    );
+  });
+
+  it("leaves a source without angle brackets byte for byte", () => {
+    const src = 'flowchart TD\n  a["x"] --> b{"y?"}';
+    expect(escapeAngles(src)).toBe(src);
   });
 });
 

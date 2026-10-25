@@ -717,10 +717,6 @@ var answerIntent = map[string]string{
 // colon or an umlaut from being read as syntax: the renderer's parser is
 // strict and a parse error loses the whole picture.
 //
-// Angle brackets are barred because the renderer's sanitiser takes anything
-// in them for a tag and drops it: a message drawn as "Failed to fetch
-// <url>: <cause>" read "Failed to fetch : ", in a label and an edge alike.
-//
 // The closing paragraph settles a contradiction the model was left to resolve
 // on its own: answerBA bars source code from an Analyst answer, and a diagram
 // is syntactically a code fence, so the block came back tagged as something
@@ -759,9 +755,6 @@ Code-Fragmente nach Relevanz zur Frage bewerten". No step numbers, no
 "RANK 1:" prefixes, no clauses. Labels follow the audience rules above and
 are written in the answer language; ids stay short ASCII without spaces.
 What a node cannot say in five words goes in the prose.
-No angle brackets in the diagram: the renderer drops <url> and anything
-shaped like it as markup, and the label loses the word. Write a placeholder
-as a plain word - url, cause, n.
 No citation markers inside the fence: the sentence that introduces the
 diagram carries the markers for what it shows, and the prose still explains;
 the diagram is not a substitute.

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import mermaid from "mermaid";
 import ELK from "elkjs/lib/elk.bundled.js";
-import { diagramKind, diagramSource } from "./diagram";
+import { diagramKind, diagramSource, escapeAngles } from "./diagram";
 import { fenceRe } from "./markdown";
 import { fits, toIR } from "./diagramIR";
 import { layoutFlow } from "./diagramLayout";
@@ -84,6 +84,23 @@ describe("rongo's drawing of the corpus", () => {
       } else {
         expect(svg, "rongo drew a kind it has no drawing for").toBeNull();
       }
+    });
+
+    it(`keeps every angle bracket ${name}'s labels hold`, async () => {
+      const src = fence(text)!.body;
+      if (!own.has(diagramKind(src))) return;
+      const angles = (s: string) =>
+        (s.replace(/<br\s*\/?>/gi, "").match(/[<>]/g) ?? []).length;
+      const quoted = [...src.matchAll(/"([^"]*)"/g)].map((m) => m[1]);
+      const d = await mermaid.mermaidAPI.getDiagramFromText(escapeAngles(src));
+      const ir = toIR(d.type, d.db);
+      if (ir === null) return;
+      const drawn = [
+        ...ir.nodes.map((n) => n.label),
+        ...ir.edges.map((e) => e.label),
+        ...ir.zones.map((z) => z.title),
+      ];
+      expect(angles(drawn.join(""))).toBe(angles(quoted.join("")));
     });
 
     it(`lays out ${name} by the connector rules`, async () => {

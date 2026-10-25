@@ -1,38 +1,38 @@
-# Diagram labels: no angle brackets
+# Diagram labels: angle brackets kept by escaping, not by prompt
 
-**Status: measured 2026-10-25 on the flow corpus, BA audience,
-mimo-v2.6-flash on both lanes. No harm: diagrams 10 + 11 before, 10 + 10
-after; rubric within judge noise. The prompt line shipped.**
+**Status: a prompt line barring angle brackets was measured 2026-10-25 on the
+flow corpus and NOT shipped. The renderer path escapes them instead
+(`escapeAngles`, `ui/src/diagram.tsx`).**
 
 ## Why
 
-The renderer's sanitiser takes anything in angle brackets for a tag and drops
-it, in a node label and an edge label alike. An answer mapping webfetch's
-failures to their messages drew `Failed to fetch <url>: <cause>` as `Failed
-to fetch : `. mermaid's own drawing did the same; it is not the editorial
-renderer's doing, and the text is gone before rongo reads the parse.
+mermaid's sanitiser takes anything in angle brackets for a tag and drops it,
+in a node label and an edge label alike, before rongo reads the parse. An
+answer mapping webfetch's failures to their messages drew `Failed to fetch
+<url>: <cause>` as `Failed to fetch :`; a threshold `retries < 3` loses its
+tail the same way. rongo's own `plain()` (`ui/src/diagramIR.ts`) strips
+tag-shaped text too, so a sanitiser that stopped doing it would not bring the
+words back on its own.
 
-## What changed
+## Measured, then dropped
 
-`answerDiagram` (`backend/internal/ask/answer.go`): no angle brackets in the
-diagram, a placeholder written as a plain word.
-
-## Numbers
-
-Flow corpus rebuilt the same day: the eight Sock Shop repositories cloned and
-pinned at the shas of `2026-09-10-flow-corpus.md`, indexed into one database
-(2,855 chunks). Both arms against that database, one `TestEvalMeasureAnswers`
-invocation each (two runs).
+A line in `answerDiagram` asked for placeholders as plain words. Flow corpus
+rebuilt the same day (the eight Sock Shop repositories pinned at the shas of
+`2026-09-10-flow-corpus.md`, 2,855 chunks), BA audience, mimo-v2.6-flash on
+both lanes, one `TestEvalMeasureAnswers` invocation per arm (two runs):
 
 | arm | diagrams | rubric present | contradicted | forbidden | asked | brackets in a diagram |
 |---|---|---|---|---|---|---|
 | master `4574d5c`, run 1 | 10 | 29/33 | 1 | 1 | 2 | 0 |
 | master, run 2 | 11 | 36/39 | 0 | 1 | 1 | 0 |
-| no brackets, run 1 | 10 | 37/39 | 0 | 2 | 1 | 0 |
-| no brackets, run 2 | 10 | 34/37 | 1 | 1 | 2 | 0 |
+| prompt line, run 1 | 10 | 37/39 | 0 | 2 | 1 | 0 |
+| prompt line, run 2 | 10 | 34/37 | 1 | 1 | 2 | 0 |
 
-No diagram on this corpus used angle brackets in either arm, 41 fences in all,
-so the corpus cannot show the line working; it shows it costs nothing. The
-case that does is `eval-webfetch-errors-en` in the diagram corpus. Master's
-run 1 also had one setup turn ask back, which fails the test on master as on
-any arm.
+No harm, and no evidence of good: none of the 41 fences used brackets in
+either arm. It was dropped for what a prompt cannot do: it fixes no stored
+answer (a thread is a record), only lowers the odds for new ones, and as
+worded it barred the `-->` arrows, `<br>` and comparisons along with the
+placeholders. Escaping on the way to the renderer keeps every stored and new
+diagram's text, on both drawing paths, and leaves the prompt byte-identical.
+`corpus.test.ts` now fails if a label's `<` or `>` does not reach the drawing
+(`eval-webfetch-errors-en`).

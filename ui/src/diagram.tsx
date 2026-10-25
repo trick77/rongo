@@ -343,19 +343,55 @@ let seq = 0;
  * the session. A refused source is cheap to refuse again.
  *
  * Exported for the tests, which mock the renderer and assert on the cache. */
+/** escapeAngles writes every `<` and `>` in a diagram's text as the
+ * renderer's entity code, so it reaches the picture as a character. The
+ * renderer's sanitiser takes anything in angle brackets for a tag and drops
+ * it: a message written `Failed to fetch <url>: <cause>` drew as `Failed to
+ * fetch : `, a threshold `retries < 3` lost its tail. Text means a quoted
+ * label or edge label, and in a sequence or state diagram whatever follows
+ * a line's colon. Arrows (`-->`, `->>`) sit outside both and are never
+ * touched, nor is a `<br>`, which the renderer and rongo both read as a
+ * line break. Applied on the way to drawing only: the stored fence, and
+ * what Copy as Markdown copies, stay as the model wrote them. */
+export function escapeAngles(src: string): string {
+  if (!/[<>]/.test(src)) return src;
+  const esc = (s: string) =>
+    s
+      .split(/(<br\s*\/?>)/i)
+      .map((part, i) =>
+        i % 2 === 1 ? part : part.replace(/</g, "#lt;").replace(/>/g, "#gt;"),
+      )
+      .join("");
+  const afterColon = /^(sequenceDiagram|stateDiagram)/.test(
+    src.trimStart().replace(/^%%.*\n/gm, ""),
+  );
+  return src
+    .split("\n")
+    .map((line) => {
+      let out = line.replace(/"([^"]*)"/g, (_, s: string) => `"${esc(s)}"`);
+      if (afterColon && !line.trimStart().startsWith("%%")) {
+        const at = out.indexOf(":");
+        if (at >= 0) out = out.slice(0, at + 1) + esc(out.slice(at + 1));
+      }
+      return out;
+    })
+    .join("\n");
+}
+
 export function draw(src: string): Promise<Drawn> {
   let p = drawn.get(src);
   if (!p) {
     p = (async (): Promise<Drawn> => {
       try {
         const mermaid = await renderer();
+        const text = escapeAngles(src);
         // rongo's drawing first: its own parse is the only one a flowchart
         // pays for. A source it cannot parse is declined like any other and
         // meets the renderer's parse below, which says why.
-        const own = await ours(mermaid, src);
+        const own = await ours(mermaid, text);
         if (own !== null) return { svg: own, own: true };
-        await mermaid.parse(src);
-        const { svg } = await mermaid.render(`rongo-diagram-${++seq}`, src);
+        await mermaid.parse(text);
+        const { svg } = await mermaid.render(`rongo-diagram-${++seq}`, text);
         return { svg };
       } catch (e) {
         drawn.delete(src);

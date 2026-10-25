@@ -363,9 +363,6 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 		if !strings.Contains(p, "No citation markers inside the fence") {
 			t.Errorf("the %s prompt lets a marker into the fence, where a bracket is syntax", name)
 		}
-		if !strings.Contains(p, "No angle brackets in the diagram") {
-			t.Errorf("the %s prompt lets a <placeholder> into the diagram, which the renderer drops as markup", name)
-		}
 	}
 	// The diagram rule follows the audience block, so "the audience rules
 	// above" are the ones the model just read.
