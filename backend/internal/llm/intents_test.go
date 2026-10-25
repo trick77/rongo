@@ -34,9 +34,9 @@ func say(t *testing.T, c *Client, opts ...Option) {
 }
 
 // A gate call asks for the shallowest reasoning the model allows; an answer
-// call leaves the model at its own default. Neither names a level: that is the
-// profile's.
-func TestReasoning_gateIsMinimalAndTheAnswerIsTheModelsDefault(t *testing.T) {
+// call asks for Balanced, never no knob: a no-knob allowance can outrun the
+// call timeout. Neither names a level: that is the profile's.
+func TestReasoning_gateIsMinimalAndTheAnswerIsBalanced(t *testing.T) {
 	c, srv := intentClient(t, nil)
 
 	say(t, c, ShortGate(), WithoutThinking())
@@ -45,13 +45,22 @@ func TestReasoning_gateIsMinimalAndTheAnswerIsTheModelsDefault(t *testing.T) {
 	}
 
 	say(t, c)
+	if got := srv.Last().Reasoning(); got != llmwiretest.BalancedSent {
+		t.Errorf("answer reasoning = %q, want balanced (%q)", got, llmwiretest.BalancedSent)
+	}
+	say(t, c, Pro())
+	if got := srv.Last().Reasoning(); got != llmwiretest.BalancedSent {
+		t.Errorf("Pro() answer reasoning = %q, want balanced (%q)", got, llmwiretest.BalancedSent)
+	}
+	say(t, c, ShortGate())
 	if got := srv.Last().Reasoning(); got != "" {
-		t.Errorf("answer reasoning = %q, want none sent: the model's default", got)
+		t.Errorf("gate call without an intent sent %q, want none: Balanced is the answer lane's", got)
 	}
 }
 
-// A configured answer level is sent on answer calls only; gate calls stay
-// minimal, and a call asked not to think is not overridden by it.
+// A configured answer level is sent on answer calls only, in place of
+// Balanced; gate calls stay minimal, and a call asked not to think is not
+// overridden by it.
 func TestReasoning_aConfiguredAnswerLevelReachesTheAnswerOnly(t *testing.T) {
 	srv := llmwiretest.NewServer(t)
 	c, err := NewClient(Config{BaseURL: srv.URL, Registry: llmtest.Registry(),
@@ -114,8 +123,8 @@ func TestMaxAnswerTokens_capsTheAnswerAndLeavesReasoningToTheProfile(t *testing.
 	}
 
 	say(t, c, WithMaxAnswerTokens(64))
-	if got, _ := srv.Last().MaxTokens(); got <= 64 {
-		t.Errorf("answer cap = %d, want 64 plus room for the default reasoning", got)
+	if got, _ := srv.Last().MaxTokens(); got != 64+llmwiretest.BalancedOverhead {
+		t.Errorf("answer cap = %d, want 64 plus the balanced overhead", got)
 	}
 
 	say(t, c)

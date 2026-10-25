@@ -66,7 +66,7 @@ func TestLoad_refusesTheRetiredGateReasoningVariable(t *testing.T) {
 	}
 }
 
-// The answer lane's reasoning level is optional: empty is the model's default.
+// The answer lane's reasoning level is optional: empty sends Balanced.
 // Whether the model takes the level is its profile's, checked in llm.NewClient.
 func TestLoad_answerReasoningIsOptional(t *testing.T) {
 	setEnv(t, nil)

@@ -85,9 +85,9 @@ type Config struct {
 	// decision must not re-roll between runs. config.Load holds the default.
 	GateTemperature *float64
 	// AnswerReasoning is the effort level answer-lane calls send
-	// (BACKEND_LLM_REASONING); empty sends none, and the model runs at its own
-	// default. NewClient refuses a level the answer model's profile does not
-	// list. A call asked not to think (WithoutThinking) still sends minimal.
+	// (BACKEND_LLM_REASONING); empty sends llmwire's Balanced intent. NewClient
+	// refuses a level the answer model's profile does not list. A call asked
+	// not to think (WithoutThinking) still sends minimal.
 	AnswerReasoning string
 	// Registry and Lookup replace llmwire's shipped profiles and the process
 	// environment. Tests only; nil in production.
@@ -459,8 +459,8 @@ func requireLane(reg *llmwire.Registry, variable, model string, needs llmwire.Ne
 }
 
 // requireLevel refuses an answer reasoning level the answer model's profile
-// does not list, naming the levels it does. Empty is the model's default and
-// always fits.
+// does not list, naming the levels it does. Empty is Balanced, which llmwire
+// resolves from the profile, and always fits.
 func requireLevel(p *llmwire.Profile, level string) error {
 	if level == "" || p.Reasoning.Accepts(level) {
 		return nil
@@ -506,14 +506,18 @@ func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 	if o.pinTemperature {
 		req.Temperature = c.gateTemperature
 	}
-	// Gate calls reason as little as the model allows; every other call is
-	// read by a person and runs at the model's own default, or at the level
-	// the deployment pinned for the answer lane.
+	// Gate calls reason as little as the model allows. An answer-lane call is
+	// read by a person and runs at the level the deployment pinned, else at
+	// Balanced, never with no knob: a profile may give the no-knob default a
+	// far larger allowance (8192 on mimo-v2.6-flash), and the answer's cap
+	// plus that would outrun config.DefaultLLMTimeout.
 	switch {
 	case o.thinkingOff:
 		req.Reasoning = llmwire.ReasoningMinimal()
 	case o.lane == LaneAnswer && c.answerReasoning != "":
 		req.Reasoning = llmwire.ReasoningEffort(c.answerReasoning)
+	case o.lane == LaneAnswer:
+		req.Reasoning = llmwire.ReasoningBalanced()
 	}
 	// A pinned level was checked against the profile at boot, so it keeps
 	// llmwire's strict validation; only the soft knobs may be demoted.

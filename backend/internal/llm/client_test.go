@@ -499,8 +499,8 @@ func TestWithGateTemperature_isSentAndIsOtherwiseTheEndpointsDefault(t *testing.
 	if got2.Model != testAnswerModel {
 		t.Errorf("model = %q, want the Pro deployment — WithGateTemperature must not reroute", got2.Model)
 	}
-	if r := got2.reasoning(); r != "" {
-		t.Errorf("reasoning = %q, want it untouched", r)
+	if r := got2.reasoning(); r != llmwiretest.BalancedSent {
+		t.Errorf("reasoning = %q, want the answer lane's balanced untouched", r)
 	}
 }
 
@@ -775,7 +775,7 @@ func TestWithJSONObject_asksForAJSONObjectAndIsOtherwiseAbsent(t *testing.T) {
 	if got2.ResponseFormat == nil || got2.ResponseFormat.Type != "json_object" {
 		t.Errorf("response_format = %+v, want json_object", got2.ResponseFormat)
 	}
-	if got2.Model != testAnswerModel || got2.reasoning() != "" {
+	if got2.Model != testAnswerModel || got2.reasoning() != llmwiretest.BalancedSent {
 		t.Errorf("model = %q reasoning = %q, want the call otherwise unchanged", got2.Model, got2.reasoning())
 	}
 }
