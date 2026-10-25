@@ -180,6 +180,19 @@ function flowchartLine(line: string): string {
 const sequenceWords =
   /^(\s*)(alt|else|opt|loop|par|and|critical|option|break|rect|box|participant|actor|create participant|create actor|note|title)(?=\s|:|$)(.*)$/i;
 
+/** dropStrayMarks removes a line holding a class mark and nothing else,
+ * `:::focus` on its own. The prompt asks for a mark right after a node, and
+ * a model has written one more on a line of its own after the last edge;
+ * the renderer refuses the whole source over it, and the mark marks
+ * nothing, so dropping it costs nothing a reader would see. */
+export function dropStrayMarks(src: string): string {
+  if (!src.includes(":::")) return src;
+  return src
+    .split("\n")
+    .filter((l) => !/^\s*:::[A-Za-z][\w-]*\s*;?\s*$/.test(l))
+    .join("\n");
+}
+
 export function escapeAngles(src: string): string {
   if (!/[<>]/.test(src)) return src;
   const kind = diagramKind(src);

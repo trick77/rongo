@@ -66,6 +66,14 @@ describe("rongo's own drawing", () => {
     expect(renderSvg).not.toHaveBeenCalled();
   });
 
+  it("drops a class mark standing alone on a line before anything reads the source", async () => {
+    editorial.mockResolvedValueOnce('<svg data-own="1"></svg>');
+    await draw("flowchart TD\n  a --> b:::focus\n:::focus");
+    expect(editorial.mock.calls.at(-1)![1]).toBe(
+      "flowchart TD\n  a --> b:::focus",
+    );
+  });
+
   it("leaves a flowchart it cannot parse to the renderer's refusal", async () => {
     editorial.mockRejectedValueOnce(new Error("Parse error"));
     const out = await draw("flowchart TD\n bad -->");

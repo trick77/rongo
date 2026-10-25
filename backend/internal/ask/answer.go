@@ -755,6 +755,9 @@ Code-Fragmente nach Relevanz zur Frage bewerten". No step numbers, no
 "RANK 1:" prefixes, no clauses. Labels follow the audience rules above and
 are written in the answer language; ids stay short ASCII without spaces.
 What a node cannot say in five words goes in the prose.
+In a flowchart, mark the one or two nodes the question is about with
+:::focus right after the node - b{"Betrag gültig?"}:::focus - and no
+others; when the whole picture answers the question alike, mark none.
 No citation markers inside the fence: the sentence that introduces the
 diagram carries the markers for what it shows, and the prose still explains;
 the diagram is not a substitute.

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import mermaid from "mermaid";
 import ELK from "elkjs/lib/elk.bundled.js";
 import { diagramKind, diagramSource, ownKinds } from "./diagram";
-import { escapeAngles } from "./diagramText";
+import { dropStrayMarks, escapeAngles } from "./diagramText";
 import { fenceRe } from "./markdown";
 import { fits, toIR, type DiagramIR } from "./diagramIR";
 import { layoutFlow } from "./diagramLayout";
@@ -35,7 +35,8 @@ const goldens: Record<string, string> = import.meta.glob(
 );
 
 /** fence returns the tag and body of the one diagram fence in an answer,
- * read as markdown.tsx reads it. */
+ * read as markdown.tsx reads it and as draw() hands it on: a stray class
+ * mark on a line of its own already dropped. */
 function fence(text: string): { tag: string; body: string } | null {
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
@@ -45,7 +46,7 @@ function fence(text: string): { tag: string; body: string } | null {
     for (i++; i < lines.length && !fenceRe.test(lines[i]); i++)
       body.push(lines[i]);
     const src = diagramSource(open[1], body.join("\n"));
-    if (src !== null) return { tag: open[1], body: src };
+    if (src !== null) return { tag: open[1], body: dropStrayMarks(src) };
   }
   return null;
 }

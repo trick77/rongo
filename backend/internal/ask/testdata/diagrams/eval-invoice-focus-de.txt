@@ -1,0 +1,14 @@
+Der Rechnungsbetrag ist die Summe der Positionen zu ihren Stückpreisen plus pauschale Versandkosten [1][4].
+
+```mermaid
+flowchart TD
+    a["Bestellung aufgeben"] --> b["Positionen laden"]
+    b --> c["Betrag berechnen"]:::focus
+    c --> d{"Zahlung autorisiert?"}
+    d -- "ja" --> e["Versand auslösen"]
+    e --> f["Bestellung speichern"]
+    d -- "nein" --> g["Bestellung abgelehnt"]
+:::focus
+```
+
+Die Versandkosten sind im Code fest hinterlegt [4].

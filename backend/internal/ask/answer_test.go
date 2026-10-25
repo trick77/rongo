@@ -363,6 +363,12 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 		if !strings.Contains(p, "No citation markers inside the fence") {
 			t.Errorf("the %s prompt lets a marker into the fence, where a bracket is syntax", name)
 		}
+		// The picture's one colour means "what the question is about", and
+		// only the model can say which node that is: the browser frames a
+		// :::focus node in the accent and infers nothing.
+		if !strings.Contains(p, `}:::focus`) || !strings.Contains(p, "one or two nodes the question is about") {
+			t.Errorf("the %s prompt does not ask for the focus mark", name)
+		}
 	}
 	// The diagram rule follows the audience block, so "the audience rules
 	// above" are the ones the model just read.
