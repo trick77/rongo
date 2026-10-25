@@ -34,9 +34,9 @@ func say(t *testing.T, c *Client, opts ...Option) {
 }
 
 // A gate call asks for the shallowest reasoning the model allows; an answer
-// call asks for Balanced, never no knob: a no-knob allowance can outrun the
-// call timeout. Neither names a level: that is the profile's.
-func TestReasoning_gateIsMinimalAndTheAnswerIsBalanced(t *testing.T) {
+// call leaves the model at its own default. Neither names a level: that is the
+// profile's.
+func TestReasoning_gateIsMinimalAndTheAnswerIsTheModelsDefault(t *testing.T) {
 	c, srv := intentClient(t, nil)
 
 	say(t, c, ShortGate(), WithoutThinking())
@@ -45,22 +45,145 @@ func TestReasoning_gateIsMinimalAndTheAnswerIsBalanced(t *testing.T) {
 	}
 
 	say(t, c)
-	if got := srv.Last().Reasoning(); got != llmwiretest.BalancedSent {
-		t.Errorf("answer reasoning = %q, want balanced (%q)", got, llmwiretest.BalancedSent)
-	}
-	say(t, c, Pro())
-	if got := srv.Last().Reasoning(); got != llmwiretest.BalancedSent {
-		t.Errorf("Pro() answer reasoning = %q, want balanced (%q)", got, llmwiretest.BalancedSent)
-	}
-	say(t, c, ShortGate())
 	if got := srv.Last().Reasoning(); got != "" {
-		t.Errorf("gate call without an intent sent %q, want none: Balanced is the answer lane's", got)
+		t.Errorf("answer reasoning = %q, want none sent: the model's default", got)
 	}
 }
 
-// A configured answer level is sent on answer calls only, in place of
-// Balanced; gate calls stay minimal, and a call asked not to think is not
-// overridden by it.
+// laneClient is a client on llmwiretest's fake endpoint with the answer lane
+// on answer, the gate lane on Gate, pinned at level ("" = unpinned).
+func laneClient(t *testing.T, answer, level string) (*Client, *llmwiretest.Server) {
+	t.Helper()
+	srv := llmwiretest.NewServer(t)
+	c, err := NewClient(Config{BaseURL: srv.URL, Registry: llmtest.Registry(),
+		Answer: answer, Gate: llmtest.Gate, AnswerReasoning: level}, srv.Server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, srv
+}
+
+// An unpinned answer call sends no knob while answer plus the model's no-knob
+// allowance streams inside config.DefaultLLMTimeout, and Balanced past it:
+// the timeout is a hard cap. Decided per call, on that call's budget.
+func TestReasoning_anUnpinnedAnswerIsBalancedOnlyWhereNoKnobOutrunsTheTimeout(t *testing.T) {
+	over := streamBound - llmtest.DeepNoKnobOverhead + 1
+	c, srv := laneClient(t, llmtest.Deep, "")
+
+	say(t, c, WithMaxAnswerTokens(over))
+	if got := srv.Last().Reasoning(); got != llmwiretest.BalancedSent {
+		t.Errorf("past the bound: reasoning = %q, want balanced (%q)", got, llmwiretest.BalancedSent)
+	}
+	if got, _ := srv.Last().MaxTokens(); got != over+llmwiretest.BalancedOverhead {
+		t.Errorf("past the bound: cap = %d, want %d plus the balanced overhead", got, over)
+	}
+	say(t, c, Pro(), WithMaxAnswerTokens(over))
+	if got := srv.Last().Reasoning(); got != llmwiretest.BalancedSent {
+		t.Errorf("Pro() past the bound: reasoning = %q, want balanced", got)
+	}
+
+	// One token less fits: no knob, the cap is the no-knob allowance's.
+	say(t, c, WithMaxAnswerTokens(over-1))
+	if got := srv.Last().Reasoning(); got != "" {
+		t.Errorf("at the bound: reasoning = %q, want none sent", got)
+	}
+	if got, _ := srv.Last().MaxTokens(); got != streamBound {
+		t.Errorf("at the bound: cap = %d, want %d", got, streamBound)
+	}
+
+	// A smaller budget on the same model, and the gate lane, stay as they were.
+	say(t, c)
+	if got, _ := srv.Last().MaxTokens(); srv.Last().Reasoning() != "" || got != defaultMaxAnswerTokens+llmtest.DeepNoKnobOverhead {
+		t.Errorf("default budget: reasoning = %q cap = %d, want none and %d", srv.Last().Reasoning(), got,
+			defaultMaxAnswerTokens+llmtest.DeepNoKnobOverhead)
+	}
+	gsrv := llmwiretest.NewServer(t)
+	g, err := NewClient(Config{BaseURL: gsrv.URL, Registry: llmtest.Registry(),
+		Answer: llmtest.Answer, Gate: llmtest.Deep}, gsrv.Server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	say(t, g, ShortGate(), WithMaxAnswerTokens(over))
+	if got := gsrv.Last().Reasoning(); got != "" {
+		t.Errorf("gate lane past the bound sent %q, want none: Balanced is the answer lane's", got)
+	}
+}
+
+// Under the bound the request is the one an answer call sent before the rule:
+// no reasoning key of any spelling, the no-knob cap.
+func TestReasoning_anUnpinnedAnswerUnderTheBoundSendsNoReasoningKey(t *testing.T) {
+	for _, model := range []string{llmtest.Answer, llmtest.Deep} {
+		c, srv := laneClient(t, model, "")
+		say(t, c)
+		for _, k := range []string{"reasoning_effort", "reasoning", "thinking"} {
+			if v, has := srv.Last().Body[k]; has {
+				t.Errorf("%s: body carries %s = %v, want no reasoning key", model, k, v)
+			}
+		}
+	}
+}
+
+// An operator pin wins on both sides of the bound.
+func TestReasoning_aPinnedLevelWinsOnBothSidesOfTheBound(t *testing.T) {
+	over := streamBound - llmtest.DeepNoKnobOverhead + 1
+	for name, budget := range map[string]int{"under": defaultMaxAnswerTokens, "over": over} {
+		t.Run(name, func(t *testing.T) {
+			c, srv := laneClient(t, llmtest.Deep, "high")
+			say(t, c, WithMaxAnswerTokens(budget))
+			if got := srv.Last().Reasoning(); got != "high" {
+				t.Errorf("reasoning = %q, want the pinned high", got)
+			}
+		})
+	}
+}
+
+// noKnobCap mirrors llmwire's plan, which llmwire does not export. Checked
+// against the cap llmwire actually puts on the wire for a no-knob request, on
+// every shipped streaming model and the synthetic ones, so a llmwire bump
+// that changes its rule fails here.
+func TestNoKnobCap_isWhatLlmwirePlans(t *testing.T) {
+	for _, tc := range []struct {
+		reg  *llmwire.Registry
+		gate string
+	}{
+		{llmwire.Default(), llmwire.Default().ChatModels(llmwire.Needs{Tools: true})[0]},
+		{llmtest.Registry(), llmtest.Gate},
+	} {
+		for _, model := range tc.reg.ChatModels(llmwire.Needs{Streaming: true}) {
+			t.Run(model, func(t *testing.T) {
+				srv := llmwiretest.NewServer(t)
+				c, err := NewClient(Config{BaseURL: srv.URL, APIKey: "k", Registry: tc.reg,
+					Answer: model, Gate: tc.gate}, srv.Server.Client())
+				if err != nil {
+					t.Fatal(err)
+				}
+				wire := llmwire.New(llmwire.Config{BaseURL: srv.URL, APIKey: "k", Registry: tc.reg,
+					HTTPClient: srv.Server.Client()})
+				for _, n := range []int{1, defaultMaxAnswerTokens, streamBound} {
+					s, _, err := wire.ChatStream(context.Background(), llmwire.ChatRequest{Model: model,
+						Messages: []llmwire.Message{llmwire.User("x")}, MaxAnswerTokens: &n})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := s.Collect(func(string) {}); err != nil {
+						t.Fatal(err)
+					}
+					_ = s.Close()
+					want, ok := srv.Last().MaxTokens()
+					if !ok {
+						t.Fatal("no cap on the wire")
+					}
+					if got := c.noKnobCap(n); got != want {
+						t.Errorf("budget %d: noKnobCap = %d, llmwire sent %d", n, got, want)
+					}
+				}
+			})
+		}
+	}
+}
+
+// A configured answer level is sent on answer calls only; gate calls stay
+// minimal, and a call asked not to think is not overridden by it.
 func TestReasoning_aConfiguredAnswerLevelReachesTheAnswerOnly(t *testing.T) {
 	srv := llmwiretest.NewServer(t)
 	c, err := NewClient(Config{BaseURL: srv.URL, Registry: llmtest.Registry(),
@@ -123,8 +246,8 @@ func TestMaxAnswerTokens_capsTheAnswerAndLeavesReasoningToTheProfile(t *testing.
 	}
 
 	say(t, c, WithMaxAnswerTokens(64))
-	if got, _ := srv.Last().MaxTokens(); got != 64+llmwiretest.BalancedOverhead {
-		t.Errorf("answer cap = %d, want 64 plus the balanced overhead", got)
+	if got, _ := srv.Last().MaxTokens(); got <= 64 {
+		t.Errorf("answer cap = %d, want 64 plus room for the default reasoning", got)
 	}
 
 	say(t, c)

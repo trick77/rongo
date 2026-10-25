@@ -129,9 +129,9 @@ type Config struct {
 	LLMGateTemperature *float64
 	LLMTimeout         time.Duration
 	// LLMReasoning pins the answer lane's reasoning effort level; empty sends
-	// llmwire's Balanced intent. Checked against the answer
-	// model's profile in llm.NewClient, not here: config stays a stdlib-only
-	// leaf.
+	// none (the model's default), or Balanced where no knob would outrun
+	// DefaultLLMTimeout. Checked against the answer model's profile in
+	// llm.NewClient, not here: config stays a stdlib-only leaf.
 	LLMReasoning string
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
@@ -199,12 +199,12 @@ const minSessionSecret = 32
 
 // DefaultLLMTimeout bounds one model call, body included. The answer call is
 // the longest: it streams its whole cap, which is ask's 16384-token answer
-// budget plus the reasoning allowance llmwire adds for the Balanced level the
-// answer lane sends (1024 where unmeasured), 17408 tokens. At
-// SlowestStreamTokensPerSecond that is 870 seconds, 14.5 minutes, so 15
-// minutes lets a slow endpoint finish. 15 minutes is a hard cap: the answer
-// sends Balanced rather than no knob because a no-knob allowance can be far
-// larger (8192 on mimo-v2.6-flash, 24576 tokens, 20.5 minutes).
+// budget plus the reasoning allowance llmwire adds for the model (1024 where
+// unmeasured), 17408 tokens. At SlowestStreamTokensPerSecond that is 870
+// seconds, 14.5 minutes, so 15 minutes lets a slow endpoint finish. 15 minutes
+// is a hard cap, never raised: an unpinned answer whose no-knob cap would not
+// fit (8192 on mimo-v2.6-flash, 24576 tokens, 20.5 minutes) sends Balanced,
+// whose allowance is the level's; every other model sends no knob.
 // ask's TestAnswerCap_fitsTheDefaultTimeoutOnEveryModel checks the sum
 // against every shipped model's actual cap; raising the answer budget or a
 // profile's allowance past it fails there.

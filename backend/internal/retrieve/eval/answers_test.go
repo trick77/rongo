@@ -10,7 +10,8 @@
 // own; BACKEND_EVAL_ANSWER_MODEL and BACKEND_EVAL_GATE_MODEL point them at
 // another model for the harness alone. A candidate answer model does not take
 // BACKEND_LLM_REASONING; it runs at BACKEND_EVAL_ANSWER_REASONING, unset =
-// Balanced. The judge runs on its own client
+// unpinned (no knob, Balanced only where no knob outruns the timeout). The
+// judge runs on its own client
 // without those overrides, so a swapped gate model is graded by the same
 // judge as the baseline.
 //
@@ -105,7 +106,7 @@ func answerLLM(t *testing.T) *llm.Client {
 // model drops the product's BACKEND_LLM_REASONING: that level was chosen for
 // the product's model, and the candidate may not take it or would silently
 // inherit it. The candidate runs at BACKEND_EVAL_ANSWER_REASONING, unset =
-// Balanced.
+// unpinned, as the product.
 func answerOverrides(cfg llm.Config, getenv func(string) string) llm.Config {
 	if m := getenv("BACKEND_EVAL_ANSWER_MODEL"); m != "" {
 		cfg.Answer = m
@@ -118,7 +119,7 @@ func answerOverrides(cfg llm.Config, getenv func(string) string) llm.Config {
 }
 
 // A candidate answer model never inherits the product's pinned level: it is
-// measured at Balanced, or at BACKEND_EVAL_ANSWER_REASONING.
+// measured unpinned, or at BACKEND_EVAL_ANSWER_REASONING.
 func TestAnswerOverrides_theCandidateTakesItsOwnReasoning(t *testing.T) {
 	product := llm.Config{Answer: "prod", Gate: "gate", AnswerReasoning: "high"}
 	for name, tc := range map[string]struct {
