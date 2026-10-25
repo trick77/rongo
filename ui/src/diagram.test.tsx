@@ -107,7 +107,7 @@ describe("rongo's own drawing", () => {
       <Diagram src={"flowchart TD\n no --> wider"} />,
     );
     const button = await findByLabelText(/full view/);
-    const card = button.closest(".relative") as HTMLElement;
+    const card = button.closest(".w-max") as HTMLElement;
     expect(card.className).toContain("max-w-full");
     expect(
       (card.parentElement as HTMLElement).getAttribute("style"),

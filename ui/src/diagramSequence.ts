@@ -111,9 +111,14 @@ const noteMin = 80;
 const noteGap = 12;
 /** A note over two lifelines reaches this far past both. */
 const noteReach = 24;
-/** A frame: past its outermost lifeline, its title band, title inset. */
+/** A frame: past its outermost lifeline, and the inset of what it holds
+ * (its title, a label, a frame inside it) from its sides. */
 const framePad = 16;
 const titleInset = 12;
+/** The least a frame inside another sits from that frame's edges: its
+ * sides by the inset, its top below the title band, its foot above the
+ * end row's padding. The check holds the layout to it. */
+export const nestInset = titleInset;
 /** Above and below a frame's title, inside the frame. */
 const titlePad = 8;
 /** A frame's condition: one line, and the widest before it wraps. */
@@ -367,7 +372,16 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
       const open = stack.pop()!;
       const f = open.f;
       f.h = y - rowGap / 2 + 6 - f.y;
-      const cols = open.cols.size > 0 ? [...open.cols] : xs.map((_, i) => i);
+      // A frame holding no row spans what the frame around it has spanned
+      // so far, else every lifeline: spanning every lifeline inside a
+      // frame would stretch that frame across all of them too.
+      const parent = stack.at(-1);
+      const cols =
+        open.cols.size > 0
+          ? [...open.cols]
+          : parent && parent.cols.size > 0
+            ? [...parent.cols]
+            : xs.map((_, i) => i);
       let x0 = Math.min(...cols.map((c) => xs[c])) - framePad;
       let x1 = Math.max(...cols.map((c) => xs[c])) + framePad;
       for (const b of open.boxes) {
@@ -383,9 +397,8 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
       f.title.x = x0 + titleInset;
       for (const d of f.dividers) if (d.label) d.label.x = x0 + titleInset;
       // The frame it sits in holds it whole, inset as it holds a label.
-      const parent = stack.at(-1);
       if (parent) {
-        for (const c of cols) parent.cols.add(c);
+        for (const c of open.cols) parent.cols.add(c);
         parent.boxes.push(f);
       }
       y = f.y + f.h + rowGap;

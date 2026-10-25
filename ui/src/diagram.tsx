@@ -455,7 +455,7 @@ export default function Diagram({ src }: { src: string }): ReactNode {
   if (out.own) {
     return (
       <div className="mt-3">
-        <div ref={card} className="relative w-max max-w-full">
+        <div ref={card} className="w-max max-w-full">
           {tools("above")}
           <MermaidSvg svg={out.svg} title={title} />
           {full && (

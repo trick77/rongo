@@ -73,11 +73,6 @@ describe("the diagram corpus", () => {
   }
 });
 
-/** Which drawing each answer gets: rongo's own for the kinds it draws
- * (ownKinds), the renderer's for the rest. Asserted per answer, so a
- * diagram that quietly falls back to the renderer fails here rather than
- * looking like it always did. */
-
 /** labels is every text an IR draws, for the bracket count. */
 function labels(ir: DiagramIR): string[] {
   if (ir.kind === "sequence")
@@ -99,6 +94,10 @@ describe("rongo's drawing of the corpus", () => {
 
   for (const [path, text] of Object.entries(goldens)) {
     const name = path.slice(path.lastIndexOf("/") + 1);
+    // Which drawing each answer gets: rongo's own for the kinds it draws
+    // (ownKinds), the renderer's for the rest. Asserted per answer, so a
+    // diagram that quietly falls back to the renderer fails here rather
+    // than looking like it always did.
     it(`draws ${name} with the drawing its kind gets`, async () => {
       const src = fence(text)!.body;
       const svg = await editorial(mermaid, escapeAngles(src), "corpus");

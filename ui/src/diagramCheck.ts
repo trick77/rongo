@@ -2,6 +2,7 @@ import type { FlowLayout, NodeBox, Point } from "./diagramLayout";
 import { titleRoom } from "./diagramLayout";
 import {
   boxPad,
+  nestInset,
   notePad,
   type SeqLifeline,
   type SequenceLayout,
@@ -163,18 +164,22 @@ export function checkSequence(l: SequenceLayout): string[] {
       if (above.some((r) => d.y < r.y + r.h + 2))
         out.push(`frame ${i} divider ${j}: runs into the text above it`);
     });
-    // A later frame either clears this one or sits inside it, inset on
-    // every side and clear of its dividers; frames open in source order, so
-    // a frame inside comes after the one holding it.
+    // A later frame either clears this one or sits inside it: inset on
+    // every side, and clear of its dividers and of the title and divider
+    // texts painted over every frame. Frames open in source order, so a
+    // frame inside comes after the one holding it.
     l.frames.slice(i + 1).forEach((g, k) => {
       if (!overlaps(f, g)) return;
       const name = `frame ${i + 1 + k}`;
-      if (!within(g, f, nestInset)) {
+      if (!contains(inset(f, nestInset), g)) {
         out.push(`${name}: overlaps frame ${i} without sitting inside it`);
         return;
       }
       if (f.dividers.some((d) => d.y >= g.y && d.y <= g.y + g.h))
         out.push(`${name}: a divider of frame ${i} runs through it`);
+      const above = [f.title, ...f.dividers.flatMap((d) => d.label ?? [])];
+      if (above.some((r) => overlaps(r, g)))
+        out.push(`${name}: runs under a text of frame ${i}`);
     });
   });
   l.notes.forEach((n, i) => {
@@ -211,16 +216,13 @@ export function checkSequence(l: SequenceLayout): string[] {
   return out;
 }
 
-/** The least inset of a frame inside another, each side. */
-const nestInset = 8;
-
-/** within says r lies inside outer, at least by apart from each edge. */
-function within(r: Rect, outer: Rect, by: number): boolean {
+/** contains says r lies wholly inside outer. */
+function contains(outer: Rect, r: Rect): boolean {
   return (
-    r.x >= outer.x + by &&
-    r.y >= outer.y + by &&
-    r.x + r.w <= outer.x + outer.w - by &&
-    r.y + r.h <= outer.y + outer.h - by
+    r.x >= outer.x &&
+    r.y >= outer.y &&
+    r.x + r.w <= outer.x + outer.w &&
+    r.y + r.h <= outer.y + outer.h
   );
 }
 
