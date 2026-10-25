@@ -29,6 +29,19 @@ const (
 	NoTools = llmwiretest.BudgetModel
 	// Embed is an embeddings model: not a chat model at all.
 	Embed = llmwiretest.EmbedModel
+	// Deep is Answer under another id on Answer's provider, with a large
+	// no-knob reasoning allowance and room to spend it: the shape of a model
+	// whose default thinks long.
+	Deep = "rongotest-deep"
+	// DeepNoKnobOverhead is Deep's reasoning.overhead for no knob ("default").
+	DeepNoKnobOverhead = 6000
+	// DeepMaxOutput is Deep's output limit.
+	DeepMaxOutput = 65536
+	// Flat is Deep with a no-knob allowance no larger than Balanced's
+	// (FlatNoKnobOverhead): the shape of a model Balanced would not shorten.
+	Flat = "rongotest-flat"
+	// FlatNoKnobOverhead is Flat's reasoning.overhead for no knob ("default").
+	FlatNoKnobOverhead = llmwiretest.BalancedOverhead
 )
 
 var (
@@ -36,10 +49,10 @@ var (
 	reg  *llmwire.Registry
 )
 
-// Registry holds llmwiretest's profiles and Gate. Shared and read-only.
+// Registry holds llmwiretest's profiles, Gate, Deep and Flat. Shared and read-only.
 func Registry() *llmwire.Registry {
 	once.Do(func() {
-		doc, err := withGate(llmwiretest.Profiles())
+		doc, err := withClones(llmwiretest.Profiles())
 		if err == nil {
 			reg, err = llmwire.NewRegistry(doc)
 		}
@@ -50,8 +63,9 @@ func Registry() *llmwire.Registry {
 	return reg
 }
 
-// withGate clones the synthetic chat profile as Gate on GateProvider.
-func withGate(doc []byte) ([]byte, error) {
+// withClones clones the synthetic chat profile as Gate on GateProvider and as
+// Deep and Flat on Answer's own provider.
+func withClones(doc []byte) ([]byte, error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal(doc, &root); err != nil {
 		return nil, err
@@ -68,24 +82,63 @@ func withGate(doc []byte) ([]byte, error) {
 		if id := field(p, "id"); id == nil || id.Value != Answer {
 			continue
 		}
-		var clone yaml.Node
-		raw, err := yaml.Marshal(p)
+		g, err := clone(p, Gate, "rongotest Gate")
 		if err != nil {
 			return nil, err
 		}
-		if err := yaml.Unmarshal(raw, &clone); err != nil {
-			return nil, err
-		}
-		g := clone.Content[0]
-		field(g, "id").Value = Gate
 		field(g, "provider").Value = GateProvider
-		if dn := field(g, "display_name"); dn != nil {
-			dn.Value = "rongotest Gate"
-		}
 		profiles.Content = append(profiles.Content, g)
+		for _, c := range []struct {
+			id, name string
+			noKnob   int
+		}{{Deep, "rongotest Deep", DeepNoKnobOverhead}, {Flat, "rongotest Flat", FlatNoKnobOverhead}} {
+			d, err := clone(p, c.id, c.name)
+			if err != nil {
+				return nil, err
+			}
+			if err := deepen(d, c.noKnob); err != nil {
+				return nil, err
+			}
+			profiles.Content = append(profiles.Content, d)
+		}
 		return yaml.Marshal(&root)
 	}
 	return nil, fmt.Errorf("llmwiretest profiles lack %s", Answer)
+}
+
+// clone copies profile node p under a new id and display name.
+func clone(p *yaml.Node, id, displayName string) (*yaml.Node, error) {
+	var c yaml.Node
+	raw, err := yaml.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	if err := yaml.Unmarshal(raw, &c); err != nil {
+		return nil, err
+	}
+	n := c.Content[0]
+	field(n, "id").Value = id
+	if dn := field(n, "display_name"); dn != nil {
+		dn.Value = displayName
+	}
+	return n, nil
+}
+
+// deepen gives profile d the no-knob allowance noKnob and DeepMaxOutput.
+func deepen(d *yaml.Node, noKnob int) error {
+	reasoning, limits := field(d, "reasoning"), field(d, "limits")
+	if reasoning == nil || limits == nil {
+		return fmt.Errorf("llmwiretest %s lacks reasoning or limits", Answer)
+	}
+	overhead, maxOutput := field(reasoning, "overhead"), field(limits, "max_output")
+	if overhead == nil || maxOutput == nil {
+		return fmt.Errorf("llmwiretest %s lacks reasoning.overhead or limits.max_output", Answer)
+	}
+	overhead.Content = append(overhead.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: "default"},
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: fmt.Sprint(noKnob)})
+	maxOutput.Value = fmt.Sprint(DeepMaxOutput)
+	return nil
 }
 
 // field is the value node under key in a mapping node, or nil.
