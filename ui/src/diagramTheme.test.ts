@@ -19,6 +19,14 @@ describe("textWidth", () => {
   });
 });
 
+describe("textWidth for capitals", () => {
+  it("budgets a sans capital wider than a lowercase letter, the mono alike", () => {
+    expect(textWidth("A", 100, "sans")).toBeCloseTo(68);
+    expect(textWidth("a", 100, "sans")).toBeCloseTo(56);
+    expect(textWidth("A", 100, "mono")).toBeCloseTo(60);
+  });
+});
+
 describe("wrap", () => {
   it("breaks at spaces within the width and keeps the label's own breaks", () => {
     expect(wrap("Schwellenwert überschritten?", 100, 13, "sans")).toEqual([

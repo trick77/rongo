@@ -228,6 +228,37 @@ describe("labels that do not fit the usual box", () => {
   });
 });
 
+describe("zones and loops", () => {
+  const long = "Very very long zone title that exceeds";
+
+  it("widens a mapping's frame for a title longer than its boxes", () => {
+    const ir = {
+      ...mapping,
+      zones: [{ id: "E", title: long }, mapping.zones[1]],
+    };
+    expect(check(layoutMapping(ir))).toEqual([]);
+  });
+
+  it("widens an ELK zone for its title", async () => {
+    const ir = flow([{ ...n("a"), zone: "z" }, n("b")], [e("a", "b")], {
+      zones: [{ id: "z", title: long }],
+    });
+    expect(check(await layoutElk(ir, new ELK()))).toEqual([]);
+  });
+
+  it("dashes a loop back under ELK as the spine does", async () => {
+    // A rejoining branch keeps it off the spine; c -> a runs back up.
+    const ir = flow(
+      [n("a"), n("b"), n("c"), n("x")],
+      [e("a", "b"), e("b", "c"), e("a", "x"), e("x", "c"), e("c", "a")],
+    );
+    expect(layoutSpine(ir)).toBeNull();
+    const l = await layoutElk(ir, new ELK());
+    expect(route(l, "c", "a").dashed).toBe(true);
+    expect(route(l, "a", "b").dashed).toBe(false);
+  });
+});
+
 describe("layoutMapping", () => {
   it("knows a mapping from any other left-to-right flow", () => {
     expect(isMapping(mapping)).toBe(true);
@@ -316,6 +347,15 @@ describe("tidy and onDiamond", () => {
       { x: 0, y: 10 },
       { x: 4, y: 10 },
     ]);
+  });
+
+  it("keeps the turn of a route that doubles back", () => {
+    const pts = [
+      { x: 100, y: 50 },
+      { x: 100, y: 90 },
+      { x: 100, y: 70 },
+    ];
+    expect(tidy(pts)).toEqual(pts);
   });
 
   it("moves an end from the bounding box onto the outline", () => {

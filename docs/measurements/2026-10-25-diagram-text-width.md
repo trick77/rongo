@@ -23,3 +23,17 @@ Chrome, the self-hosted faces from `ui/src/fonts` loaded (`document.fonts.check`
 Mono 0.60, exact. Sans 0.56: above every real label at either weight (0.46 to 0.52), so a box is never short for its label. A label of capitals and wide letters can still run past it; the 16px padding each side is the margin for that.
 
 The first budget was 0.60 for both faces. At that value every box on the main path wrapped a line early: "opencode run, at most 40 steps" broke onto two lines in a box it fits on one.
+
+## Capitals
+
+The same run over capitals, per letter (spaces taken out):
+
+| label | Sans 400, 13px | Sans 600, 13.5px |
+|---|---|---|
+| SEND ORDER CONFIRMATION EMAIL | 0.620 | 0.637 |
+| A–Z | 0.633 | 0.655 |
+| HTTP API JSON | 0.603 | 0.624 |
+| ÄÖÜ ÉÈ | 0.636 | 0.650 |
+| a–z, for comparison | 0.504 | 0.527 |
+
+A sans capital is budgeted at 0.68. At the 0.56 lowercase budget a label in capitals ran about 15% past its box.

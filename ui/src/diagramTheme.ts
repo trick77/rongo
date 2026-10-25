@@ -80,6 +80,9 @@ export type Face = "sans" | "mono";
  * the same under jsdom, where text has no width, and before the web font
  * has loaded, so a layout is a function of its text alone. */
 const advance: Record<Face, number> = { sans: 0.56, mono: 0.6 };
+/** A sans capital, measured at 0.60 to 0.66: at the lowercase budget a label
+ * in capitals ran past its box. */
+const capital = 0.68;
 
 /** textWidth is the width a string takes at a size: a wide or full-width
  * character costs 1em, a mark nothing, any other character its face's
@@ -88,7 +91,11 @@ export function textWidth(s: string, size: number, face: Face): number {
   let em = 0;
   for (const ch of s) {
     if (/\p{M}/u.test(ch)) continue;
-    em += wide(ch) ? 1 : advance[face];
+    em += wide(ch)
+      ? 1
+      : face === "sans" && /\p{Lu}/u.test(ch)
+        ? capital
+        : advance[face];
   }
   return em * size;
 }

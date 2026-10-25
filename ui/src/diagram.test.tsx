@@ -50,12 +50,18 @@ beforeEach(() => {
 });
 
 describe("rongo's own drawing", () => {
-  it("draws a source it covers itself, after the renderer's parse", async () => {
+  it("draws a source it covers itself, on its own parse alone", async () => {
     editorial.mockResolvedValueOnce('<svg data-own="1"></svg>');
     const out = await draw("flowchart TD\n own --> one");
     expect(out).toEqual({ svg: '<svg data-own="1"></svg>', own: true });
-    expect(parse).toHaveBeenCalled();
+    expect(parse).not.toHaveBeenCalled();
     expect(renderSvg).not.toHaveBeenCalled();
+  });
+
+  it("leaves a flowchart it cannot parse to the renderer's refusal", async () => {
+    editorial.mockRejectedValueOnce(new Error("Parse error"));
+    const out = await draw("flowchart TD\n bad -->");
+    expect(out).toEqual({ error: "Parse error on line 1" });
   });
 
   it("lets the renderer draw what it declines", async () => {

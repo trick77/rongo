@@ -151,7 +151,11 @@ function flowIR(db: unknown): FlowIR | null {
     direction: dir === "LR" ? "LR" : "TB",
     nodes,
     edges,
-    zones: subgraphs.map((s) => ({ id: s.id, title: plain(s.title ?? "") })),
+    // A subgraph holding no node is no zone: drawn, it is an empty frame,
+    // and counted, it would keep the flow from the layouts built for it.
+    zones: subgraphs
+      .filter((s) => nodes.some((n) => n.zone === s.id))
+      .map((s) => ({ id: s.id, title: plain(s.title ?? "") })),
   };
 }
 
@@ -161,14 +165,49 @@ function headOf(type: string): FlowEdgeIR["head"] {
   return "end";
 }
 
-/** plain is a label as text: a mermaid line break is a line break, any other
- * markup is dropped rather than shown, and space is collapsed. */
-function plain(s: string): string {
-  return s
+/** plain is a label as the reader should see it, as mermaid's own drawing
+ * showed it: a line break is a line break, other markup is dropped, the
+ * entities the parse left in are decoded, a markdown label loses its
+ * backticks and emphasis, and space is collapsed.
+ *
+ * The parse leaves two layers of escaping. It sanitises node and subgraph
+ * text into HTML (`&` arrives as `&amp;`), and it parks the source's own
+ * entity codes (`#quot;`, `#35;`) behind private placeholder characters
+ * that its drawing turns back into entities on the way out. Drawn as text
+ * with neither undone, `Tom & Jerry` read `Tom &amp;amp; Jerry` and a quote
+ * read as the placeholder. */
+export function plain(s: string): string {
+  const html = s
+    .replace(/ﬂ°°/g, "&#")
+    .replace(/ﬂ°/g, "&")
+    .replace(/¶ß/g, ";")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]*>/g, "")
+    .replace(/<[^>]*>/g, "");
+  return markdown(decode(html))
     .split("\n")
     .map((l) => l.replace(/\s+/g, " ").trim())
     .filter((l) => l !== "")
     .join("\n");
+}
+
+/** decode turns HTML entities into the characters they name. Through a
+ * textarea, whose content is never parsed as elements, so nothing in a
+ * label can become markup on the way. */
+function decode(s: string): string {
+  if (!s.includes("&") || typeof document === "undefined") return s;
+  const t = document.createElement("textarea");
+  t.innerHTML = s;
+  return t.value;
+}
+
+/** markdown drops the markup of a backtick-quoted markdown label, which
+ * mermaid draws formatted and this draws as plain text. */
+function markdown(s: string): string {
+  const m = /^\s*`([\s\S]*)`\s*$/.exec(s);
+  if (!m) return s;
+  return m[1]
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/(^|\s)_(.+?)_(?=\s|$)/g, "$1$2");
 }

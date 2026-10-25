@@ -1,4 +1,5 @@
 import type { FlowLayout, NodeBox, Point } from "./diagramLayout";
+import { titleRoom } from "./diagramLayout";
 import { textWidth } from "./diagramTheme";
 
 /**
@@ -22,6 +23,10 @@ export const minLabelGap = 6;
 export function check(l: FlowLayout): string[] {
   const out: string[] = [];
   const byId = new Map(l.nodes.map((n) => [n.id, n]));
+
+  for (const z of l.zones) {
+    if (titleRoom(z.title) > z.w) out.push(`${z.id}: title overflows its zone`);
+  }
 
   for (const n of l.nodes) {
     if (n.kind === "decision") continue;

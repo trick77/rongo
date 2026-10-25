@@ -355,9 +355,12 @@ export function draw(src: string): Promise<Drawn> {
     p = (async (): Promise<Drawn> => {
       try {
         const mermaid = await renderer();
-        await mermaid.parse(src);
+        // rongo's drawing first: its own parse is the only one a flowchart
+        // pays for. A source it cannot parse is declined like any other and
+        // meets the renderer's parse below, which says why.
         const own = await ours(mermaid, src);
         if (own !== null) return { svg: own, own: true };
+        await mermaid.parse(src);
         const { svg } = await mermaid.render(`rongo-diagram-${++seq}`, src);
         return { svg };
       } catch (e) {
@@ -519,11 +522,21 @@ function usePane(
       if (host.clientWidth === 0) return setRoom(null);
       const paneLeft = host.getBoundingClientRect().left + host.clientLeft;
       const t = text.getBoundingClientRect();
-      setRoom({
+      const next = {
         width: t.width,
         left: Math.max(0, t.left - (paneLeft + gutter)),
         right: Math.max(0, paneLeft + host.clientWidth - gutter - t.right),
-      });
+      };
+      // The text grows a line at a time while an answer streams, which the
+      // observer reports; unchanged room is no reason to draw again.
+      setRoom((prev) =>
+        prev &&
+        prev.width === next.width &&
+        prev.left === next.left &&
+        prev.right === next.right
+          ? prev
+          : next,
+      );
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;

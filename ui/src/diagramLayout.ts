@@ -553,6 +553,12 @@ const rowGap = 20;
 /** A zone's inner margin; the top holds its title. */
 const zonePad = { top: 44, side: 20, bottom: 20 };
 
+/** titleRoom is the width a zone needs for its title: the bold title, set
+ * 18px in, and as much again on the right. */
+export function titleRoom(title: string): number {
+  return up8(textWidth(title, ramp.bold, "sans") + 36);
+}
+
 /** layoutMapping places a trigger-to-target mapping as two frames side by
  * side, by hand rather than through ELK: the triggers stay in the order the
  * model wrote them, which a layered layout re-sorts for its own reasons.
@@ -739,8 +745,10 @@ export function layoutMapping(ir: FlowIR): FlowLayout {
     laneOf.set(i, k);
   }
 
-  const zoneW = w + 2 * zonePad.side;
-  const firstLane = zoneW + 24;
+  // A frame is as wide as its boxes, or its title where that is longer.
+  const zoneAW = Math.max(w + 2 * zonePad.side, titleRoom(za.title));
+  const zoneBW = Math.max(w + 2 * zonePad.side, titleRoom(zb.title));
+  const firstLane = zoneAW + 24;
   const lastLane = firstLane + Math.max(0, lanes.length - 1) * lane;
   const labelW = Math.max(0, ...labels.map((l) => l?.w ?? 0));
   const xt = up8(lastLane + (labelW > 0 ? 16 + labelW + 16 : 40));
@@ -781,8 +789,8 @@ export function layoutMapping(ir: FlowIR): FlowLayout {
   const bottom = (bs: NodeBox[]) => Math.max(...bs.map((b) => b.y + b.h));
   const zoneH = Math.max(bottom(srcBoxes), bottom(tgtBoxes)) + zonePad.bottom;
   const zones: ZoneBox[] = [
-    { id: za.id, title: za.title, x: 0, y: 0, w: zoneW, h: zoneH },
-    { id: zb.id, title: zb.title, x: zbX, y: 0, w: zoneW, h: zoneH },
+    { id: za.id, title: za.title, x: 0, y: 0, w: zoneAW, h: zoneH },
+    { id: zb.id, title: zb.title, x: zbX, y: 0, w: zoneBW, h: zoneH },
   ];
   const nodes = [...srcBoxes, ...tgtBoxes].sort(
     (a, b) => author.get(a.id)! - author.get(b.id)!,
@@ -979,11 +987,14 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
           points[points.length - 2],
         );
     }
+    // An edge into a box wholly before its own, against the flow, is a loop
+    // back, dashed as the spine draws it.
+    const back = tb ? to.y + to.h <= from.y : to.x + to.w <= from.x;
     const route: EdgeRoute = {
       from: ie.from,
       to: ie.to,
       points,
-      dashed: ie.dashed,
+      dashed: ie.dashed || back,
       warn: ie.dashed,
       head: ie.head,
     };
@@ -996,17 +1007,48 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
       };
     return route;
   });
-  return frame(
-    ir.nodes.map((n) => boxes.get(n.id)!),
-    routes,
-    zones,
-  );
+  const nodes = ir.nodes.map((n) => boxes.get(n.id)!);
+  widenForTitles(nodes, routes, zones);
+  return frame(nodes, routes, zones);
+}
+
+/** widenForTitles makes every zone at least as wide as its title. ELK sizes
+ * a zone from its members alone, and a minimum size set on it is not
+ * honoured once children are laid out with it. So the room is made after
+ * the layout: a band as wide as the shortfall is opened at the zone's right
+ * edge, and everything right of that edge moves over by it. A horizontal
+ * segment crossing the edge only grows and a vertical one moves whole, so
+ * every arrow stays square. */
+function widenForTitles(
+  nodes: NodeBox[],
+  routes: EdgeRoute[],
+  zones: ZoneBox[],
+): void {
+  for (const z of [...zones].sort((a, b) => b.x + b.w - (a.x + a.w))) {
+    const extra = titleRoom(z.title) - z.w;
+    if (extra <= 0) continue;
+    const cut = z.x + z.w;
+    for (const b of nodes) if (b.x >= cut) b.x += extra;
+    for (const r of routes) {
+      for (const p of r.points) if (p.x >= cut) p.x += extra;
+      if (r.label && r.label.x >= cut) r.label.x += extra;
+    }
+    for (const o of zones) {
+      if (o === z) continue;
+      if (o.x >= cut) o.x += extra;
+      else if (o.x + o.w >= cut) o.w += extra;
+    }
+    z.w += extra;
+  }
 }
 
 /** tidy drops the points rounding made redundant: a repeat, or the middle
- * of three in a line. */
+ * of three in a line running one way. A route that doubles back keeps its
+ * turn: dropping it would end the arrow somewhere else. */
 export function tidy(points: Point[]): Point[] {
   const out: Point[] = [];
+  const between = (a: number, b: number, c: number) =>
+    (a <= b && b <= c) || (a >= b && b >= c);
   for (const p of points) {
     const last = out[out.length - 1];
     if (last && last.x === p.x && last.y === p.y) continue;
@@ -1014,8 +1056,8 @@ export function tidy(points: Point[]): Point[] {
     if (
       prev &&
       last &&
-      ((prev.x === last.x && last.x === p.x) ||
-        (prev.y === last.y && last.y === p.y))
+      ((prev.x === last.x && last.x === p.x && between(prev.y, last.y, p.y)) ||
+        (prev.y === last.y && last.y === p.y && between(prev.x, last.x, p.x)))
     ) {
       out[out.length - 1] = p;
       continue;

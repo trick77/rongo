@@ -73,6 +73,31 @@ describe("toIR for a flowchart", () => {
     expect(f.nodes.map((n) => n.focus ?? false)).toEqual([false, true]);
   });
 
+  it("shows entities and markdown as mermaid's own drawing did", async () => {
+    const f = await flow(`flowchart TD
+  a["Tom &amp; Jerry &lt; 3"] --> b["say #quot;hi#quot; #35;1"]
+  b -- "a &amp; b" --> c[\`**bold** md\`]
+  subgraph s ["R&amp;D"]
+    d
+  end`);
+    expect(f.nodes.map((n) => n.label)).toEqual([
+      "Tom & Jerry < 3",
+      'say "hi" #1',
+      "bold md",
+      "d",
+    ]);
+    expect(f.edges[1].label).toBe("a & b");
+    expect(f.zones[0].title).toBe("R&D");
+  });
+
+  it("keeps no zone for a subgraph holding no node", async () => {
+    const f = await flow(`flowchart TD
+  a --> b
+  subgraph empty
+  end`);
+    expect(f.zones).toEqual([]);
+  });
+
   it("reads a line break as a line break and drops markup", async () => {
     const f = await flow(`flowchart TD
   a["one<br/>two <b>bold</b>"]`);
