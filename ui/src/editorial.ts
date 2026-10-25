@@ -1,14 +1,15 @@
-import ELK from "elkjs/lib/elk.bundled.js";
 import { fits, toIR } from "./diagramIR";
 import { layoutFlow, type Elk } from "./diagramLayout";
-import { drawFlow } from "./diagramDraw";
+import { drawFlow, drawSequence } from "./diagramDraw";
+import { layoutSequence } from "./diagramSequence";
 import { palette } from "./diagramTheme";
 
 /**
  * rongo's own drawing of a diagram source, or null when it has none and the
  * renderer should draw the source as it always did. Loaded by diagram.tsx
- * on the first fence, as its own chunk: the layout engine is large and a
- * page drawing no diagram should not carry it.
+ * on the first fence, as its own chunk. The layout engine is a chunk of its
+ * own again, loaded on the first flowchart: it is large, and a sequence
+ * never uses it.
  */
 
 /** The part of the renderer this reads: its parse, as a type and a db. */
@@ -18,7 +19,7 @@ export type Parser = {
   };
 };
 
-let elk: Elk | null = null;
+let elk: Promise<Elk> | null = null;
 
 export async function editorial(
   mermaid: Parser,
@@ -28,6 +29,15 @@ export async function editorial(
   const d = await mermaid.mermaidAPI.getDiagramFromText(src);
   const ir = toIR(d.type, d.db);
   if (ir === null || !fits(ir)) return null;
-  elk ??= new ELK();
-  return drawFlow(await layoutFlow(ir, elk), palette(), ids);
+  if (ir.kind === "sequence")
+    return drawSequence(layoutSequence(ir), palette(), ids);
+  elk ??= import("elkjs/lib/elk.bundled.js").then(
+    (m) => new m.default(),
+    (e: unknown) => {
+      // A chunk gone after a redeploy is tried again by the next flowchart.
+      elk = null;
+      throw e;
+    },
+  );
+  return drawFlow(await layoutFlow(ir, await elk), palette(), ids);
 }
