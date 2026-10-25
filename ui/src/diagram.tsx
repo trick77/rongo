@@ -298,14 +298,18 @@ function init(mermaid: Mermaid): void {
 export type Drawn = { svg: string; own?: true } | { error: string };
 
 /** The kinds rongo draws itself; every other kind is the renderer's. */
-export const ownKinds: ReadonlySet<string> = new Set(["flowchart", "graph"]);
+export const ownKinds: ReadonlySet<string> = new Set([
+  "flowchart",
+  "graph",
+  "sequenceDiagram",
+]);
 
 /** ours is rongo's drawing of a parsed source, or null where it has none.
  * Anything going wrong in it — the chunk gone after a redeploy, a layout
  * that throws — is a reason to let the renderer draw, never a failed
  * picture. */
 async function ours(mermaid: Mermaid, src: string): Promise<string | null> {
-  // Asked by kind before anything loads: a sequence or an entity diagram
+  // Asked by kind before anything loads: a state or an entity diagram
   // never fetches the layout engine or parses its source a second time.
   if (!ownKinds.has(diagramKind(src))) return null;
   try {

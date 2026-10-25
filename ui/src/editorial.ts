@@ -1,7 +1,8 @@
 import ELK from "elkjs/lib/elk.bundled.js";
 import { fits, toIR } from "./diagramIR";
 import { layoutFlow, type Elk } from "./diagramLayout";
-import { drawFlow } from "./diagramDraw";
+import { drawFlow, drawSequence } from "./diagramDraw";
+import { layoutSequence } from "./diagramSequence";
 import { palette } from "./diagramTheme";
 
 /**
@@ -28,6 +29,8 @@ export async function editorial(
   const d = await mermaid.mermaidAPI.getDiagramFromText(src);
   const ir = toIR(d.type, d.db);
   if (ir === null || !fits(ir)) return null;
+  if (ir.kind === "sequence")
+    return drawSequence(layoutSequence(ir), palette(), ids);
   elk ??= new ELK();
   return drawFlow(await layoutFlow(ir, elk), palette(), ids);
 }

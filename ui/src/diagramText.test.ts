@@ -1,7 +1,7 @@
 import { beforeAll, describe, it, expect } from "vitest";
 import mermaid from "mermaid";
 import { escapeAngles } from "./diagramText";
-import { toIR } from "./diagramIR";
+import { toIR, type FlowIR } from "./diagramIR";
 
 beforeAll(() => {
   mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
@@ -11,7 +11,7 @@ beforeAll(() => {
  * returns what rongo would draw as text. */
 async function labels(src: string): Promise<string[]> {
   const d = await mermaid.mermaidAPI.getDiagramFromText(escapeAngles(src));
-  const ir = toIR(d.type, d.db)!;
+  const ir = toIR(d.type, d.db) as FlowIR;
   return [
     ...ir.nodes.map((n) => n.label),
     ...ir.edges.map((e) => e.label).filter((l) => l !== ""),

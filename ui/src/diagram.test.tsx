@@ -79,7 +79,7 @@ describe("rongo's own drawing", () => {
   });
 
   it("never loads its drawing for a kind it does not draw", async () => {
-    await draw("sequenceDiagram\n A->>B: hi");
+    await draw("erDiagram\n A ||--o{ B : has");
     expect(editorial).not.toHaveBeenCalled();
   });
 

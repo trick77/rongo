@@ -1,6 +1,12 @@
 import type { FlowLayout, NodeBox, Point } from "./diagramLayout";
 import { titleRoom } from "./diagramLayout";
-import { textWidth } from "./diagramTheme";
+import {
+  boxPad,
+  notePad,
+  type SeqLifeline,
+  type SequenceLayout,
+} from "./diagramSequence";
+import { ramp, textWidth } from "./diagramTheme";
 
 /**
  * A layout's taste gate as code: the connector rules diagram-design holds
@@ -100,6 +106,85 @@ export function check(l: FlowLayout): string[] {
     }
   });
   return out;
+}
+
+/** checkSequence holds a sequence layout to the same taste: every text
+ * inside its box, a message's text clear of its own line, no two texts on
+ * one another or on a box, a loop's text and a note beside a lifeline
+ * clear of every other lifeline (a message's text crossing one is masked
+ * by its ground, a loop's is not), every frame wide enough for its title
+ * and apart from the next, and nothing past the canvas. */
+export function checkSequence(l: SequenceLayout): string[] {
+  const out: string[] = [];
+  for (const a of l.actors) {
+    for (const line of a.lines) {
+      if (textWidth(line, a.size, a.face) > a.w - 2 * boxPad)
+        out.push(`${a.id}: "${line}" overflows its box`);
+    }
+  }
+  l.notes.forEach((n, i) => {
+    for (const line of n.lines) {
+      if (textWidth(line, ramp.text, "sans") > n.w - 2 * notePad)
+        out.push(`note ${i}: "${line}" overflows its box`);
+    }
+  });
+
+  const texts: { name: string; r: Rect }[] = [];
+  l.messages.forEach((m, i) => {
+    const name = `${m.from}->${m.to} (${i})`;
+    if (!m.label) return;
+    const d = Math.min(
+      ...segments(m.points).map(([a, b]) => distance(m.label!, a, b)),
+    );
+    if (d < minLabelGap) out.push(`${name}: label ${d}px from its line`);
+    texts.push({ name, r: m.label });
+    if (m.self) {
+      for (const ln of l.lifelines) {
+        if (ln.id !== m.from && spansLifeline(m.label, ln))
+          out.push(`${name}: label crosses ${ln.id}'s lifeline`);
+      }
+    }
+  });
+  l.frames.forEach((f, i) => {
+    texts.push({ name: `frame ${i} title`, r: f.title });
+    f.dividers.forEach((d, j) => {
+      if (d.label) texts.push({ name: `frame ${i} divider ${j}`, r: d.label });
+    });
+    if (f.title.x + f.title.w > f.x + f.w)
+      out.push(`frame ${i}: title overflows its frame`);
+    for (const g of l.frames.slice(i + 1)) {
+      if (overlaps(f, g)) out.push(`frame ${i}: overlaps another frame`);
+    }
+  });
+  l.notes.forEach((n, i) => {
+    texts.push({ name: `note ${i}`, r: n });
+  });
+
+  texts.forEach((t, i) => {
+    for (const a of l.actors) {
+      if (overlaps(t.r, a)) out.push(`${t.name}: label over ${a.id}`);
+    }
+    for (const u of texts.slice(i + 1)) {
+      if (overlaps(t.r, u.r))
+        out.push(`${t.name} and ${u.name}: labels overlap`);
+    }
+  });
+
+  const all: Rect[] = [
+    ...l.actors,
+    ...l.notes,
+    ...l.frames,
+    ...texts.map((t) => t.r),
+  ];
+  for (const r of all) {
+    if (r.x < 0 || r.y < 0 || r.x + r.w > l.width || r.y + r.h > l.height)
+      out.push(`a box at ${r.x},${r.y} runs past the canvas`);
+  }
+  return out;
+}
+
+function spansLifeline(r: Rect, ln: SeqLifeline): boolean {
+  return r.x < ln.x && ln.x < r.x + r.w && r.y < ln.y2 && r.y + r.h > ln.y1;
 }
 
 function segments(points: Point[]): [Point, Point][] {

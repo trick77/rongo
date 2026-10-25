@@ -6,7 +6,16 @@ import type {
   Point,
   ZoneBox,
 } from "./diagramLayout";
-import { ramp, type Palette } from "./diagramTheme";
+import {
+  notePad,
+  type SeqActor,
+  type SeqFrame,
+  type SeqMessage,
+  type SeqNote,
+  type SequenceLayout,
+  type TextBlock,
+} from "./diagramSequence";
+import { ramp, textWidth, type Palette } from "./diagramTheme";
 
 /**
  * A layout written as SVG, in the reference design's vocabulary: a canvas in
@@ -116,6 +125,293 @@ export function drawFlow(l: FlowLayout, pal: Palette, ids: string): string {
       "font-family": pal.sans,
     },
     defs + body,
+  );
+}
+
+/** drawSequence writes a sequence layout in the same vocabulary: boxes
+ * framed in the line colour, lifelines a fine dash of it, messages in the
+ * muted colour, a reply dashed, a frame a tinted box titled in the small
+ * mono. No accent and no amber: the source has no focus to give, and a
+ * dashed line here is a reply, not a boundary.
+ *
+ * Paint order: canvas, frames, lifelines, participants, notes, arrows, then
+ * every text on a patch of its own ground, so a lifeline a message crosses
+ * never strikes through its words. */
+export function drawSequence(
+  l: SequenceLayout,
+  pal: Palette,
+  ids: string,
+): string {
+  const mark = (id: string, d: string, paint: Attrs, refX = 9) =>
+    el(
+      "marker",
+      {
+        id: `${ids}-${id}`,
+        viewBox: "0 0 10 10",
+        refX,
+        refY: 5,
+        markerWidth: 7,
+        markerHeight: 7,
+        orient: "auto-start-reverse",
+      },
+      el("path", { d, ...paint }),
+    );
+  const line = { fill: "none", stroke: pal.muted, "stroke-width": 1.6 };
+  const defs = el(
+    "defs",
+    {},
+    mark("arrow", "M0,0 L10,5 L0,10 z", { fill: pal.muted }) +
+      mark("open", "M1,1 L9,5 L1,9", line) +
+      mark("cross", "M2,2 L8,8 M8,2 L2,8", line, 5),
+  );
+  const body = [
+    el("rect", {
+      x: 0.5,
+      y: 0.5,
+      width: l.width - 1,
+      height: l.height - 1,
+      rx: 8,
+      fill: pal.surface,
+      stroke: pal.line,
+      "stroke-width": 1,
+    }),
+    ...l.frames.map((fr) => frame(fr, pal)),
+    ...l.lifelines.map((ln) =>
+      el("line", {
+        x1: f(ln.x),
+        y1: f(ln.y1),
+        x2: f(ln.x),
+        y2: f(ln.y2),
+        stroke: pal.line,
+        "stroke-width": 1,
+        "stroke-dasharray": "4 4",
+      }),
+    ),
+    ...l.actors.map((a) => actor(a, pal)),
+    ...l.notes.map((n) => note(n, pal)),
+    ...l.messages.map((m) => message(m, pal, ids)),
+    ...l.frames.map((fr) => frameText(fr, pal)),
+    ...l.messages.map((m) =>
+      m.label
+        ? block(m.label, m.framed ? pal.tint : pal.surface, m.self, pal)
+        : "",
+    ),
+  ].join("");
+  return el(
+    "svg",
+    {
+      xmlns: "http://www.w3.org/2000/svg",
+      viewBox: `0 0 ${l.width} ${l.height}`,
+      width: l.width,
+      height: l.height,
+      "font-family": pal.sans,
+    },
+    defs + body,
+  );
+}
+
+function frame(fr: SeqFrame, pal: Palette): string {
+  return (
+    el("rect", {
+      x: f(fr.x),
+      y: f(fr.y),
+      width: f(fr.w),
+      height: f(fr.h),
+      rx: 10,
+      fill: pal.tint,
+      stroke: pal.line,
+      "stroke-width": 1.2,
+    }) +
+    fr.dividers
+      .map((d) =>
+        el("line", {
+          x1: f(fr.x),
+          y1: f(d.y),
+          x2: f(fr.x + fr.w),
+          y2: f(d.y),
+          stroke: pal.line,
+          "stroke-width": 1,
+          "stroke-dasharray": "4 4",
+        }),
+      )
+      .join("")
+  );
+}
+
+/** frameText is a frame's title and its dividers' conditions, each on a
+ * patch of the frame's tint: a lifeline runs through the title's corner. */
+function frameText(fr: SeqFrame, pal: Palette): string {
+  const t = fr.title;
+  const mono = { "font-family": pal.mono, "font-size": ramp.label };
+  const title =
+    knockout(t, pal.tint) +
+    el(
+      "text",
+      {
+        ...mono,
+        x: f(t.x),
+        y: f(t.y + t.h / 2),
+        fill: pal.fg,
+        "font-weight": 600,
+        "dominant-baseline": "central",
+      },
+      esc(fr.keyword) +
+        (fr.label === ""
+          ? ""
+          : el(
+              "tspan",
+              {
+                fill: pal.muted,
+                "font-weight": 400,
+                dx: f(textWidth("  ", ramp.label, "mono")),
+              },
+              esc(fr.label),
+            )),
+    );
+  const conds = fr.dividers
+    .map((d) =>
+      d.label
+        ? knockout(d.label, pal.tint) +
+          el(
+            "text",
+            {
+              ...mono,
+              x: f(d.label.x),
+              y: f(d.label.y + d.label.h / 2),
+              fill: pal.muted,
+              "dominant-baseline": "central",
+            },
+            esc(d.label.lines[0]),
+          )
+        : "",
+    )
+    .join("");
+  return title + conds;
+}
+
+function knockout(
+  r: { x: number; y: number; w: number; h: number },
+  fill: string,
+): string {
+  return el("rect", {
+    x: f(r.x - 3),
+    y: f(r.y - 1),
+    width: f(r.w + 6),
+    height: f(r.h + 2),
+    fill,
+  });
+}
+
+function actor(a: SeqActor, pal: Palette): string {
+  const first = a.y + a.h / 2 - ((a.lines.length - 1) * ramp.lineHeight) / 2;
+  return (
+    el("rect", {
+      x: f(a.x),
+      y: f(a.y),
+      width: f(a.w),
+      height: f(a.h),
+      rx: 6,
+      fill: pal.surface,
+      stroke: pal.line,
+      "stroke-width": 1.2,
+    }) +
+    a.lines
+      .map((line, i) =>
+        el(
+          "text",
+          {
+            x: f(a.x + a.w / 2),
+            y: f(first + i * ramp.lineHeight),
+            fill: pal.fg,
+            "font-family": a.face === "mono" ? pal.mono : undefined,
+            "font-size": a.size,
+            "font-weight": a.bold ? 600 : undefined,
+            "text-anchor": "middle",
+            "dominant-baseline": "central",
+          },
+          esc(line),
+        ),
+      )
+      .join("")
+  );
+}
+
+function note(n: SeqNote, pal: Palette): string {
+  const first = n.y + n.h / 2 - ((n.lines.length - 1) * ramp.lineHeight) / 2;
+  return (
+    el("rect", {
+      x: f(n.x),
+      y: f(n.y),
+      width: f(n.w),
+      height: f(n.h),
+      rx: 6,
+      fill: pal.tint,
+      stroke: pal.line,
+      "stroke-width": 1,
+    }) +
+    n.lines
+      .map((line, i) =>
+        el(
+          "text",
+          {
+            x: f(n.x + notePad),
+            y: f(first + i * ramp.lineHeight),
+            fill: pal.fg,
+            "font-size": ramp.text,
+            "dominant-baseline": "central",
+          },
+          esc(line),
+        ),
+      )
+      .join("")
+  );
+}
+
+function message(m: SeqMessage, pal: Palette, ids: string): string {
+  let pts = m.points;
+  if (m.head !== "none") pts = shorten(pts, false, headGap);
+  if (m.head === "both") pts = shorten(pts, true, headGap);
+  const end =
+    m.head === "open" ? "open" : m.head === "cross" ? "cross" : "arrow";
+  return el("polyline", {
+    points: pts.map((p) => `${f(p.x)},${f(p.y)}`).join(" "),
+    fill: "none",
+    stroke: pal.muted,
+    "stroke-width": 1.4,
+    "stroke-dasharray": m.dashed ? "5 4" : undefined,
+    "marker-end": m.head === "none" ? undefined : `url(#${ids}-${end})`,
+    "marker-start": m.head === "both" ? `url(#${ids}-arrow)` : undefined,
+  });
+}
+
+/** block is a message's text on a patch of its ground: centred over its
+ * arrow, or read from the left beside a loop. */
+function block(
+  t: TextBlock,
+  ground: string,
+  start: boolean,
+  pal: Palette,
+): string {
+  const lh = t.h / t.lines.length;
+  return (
+    knockout(t, ground) +
+    t.lines
+      .map((line, i) =>
+        el(
+          "text",
+          {
+            x: f(start ? t.x : t.x + t.w / 2),
+            y: f(t.y + i * lh + lh / 2),
+            fill: pal.fg,
+            "font-family": t.face === "mono" ? pal.mono : undefined,
+            "font-size": t.size,
+            "text-anchor": start ? "start" : "middle",
+            "dominant-baseline": "central",
+          },
+          esc(line),
+        ),
+      )
+      .join("")
   );
 }
 

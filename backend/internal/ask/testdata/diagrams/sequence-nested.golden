@@ -1,0 +1,17 @@
+A retry happens inside the same turn, once [1].
+
+```mermaid
+sequenceDiagram
+  participant A as Answerer
+  participant L as llmwire
+  loop until delivered
+    A->>L: stream
+    alt nothing delivered
+      L-->>A: error
+    else delivered
+      L-->>A: tokens
+    end
+  end
+```
+
+A stream that delivered is never retried [1].

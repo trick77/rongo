@@ -39,15 +39,58 @@ export type FlowIR = {
   edges: FlowEdgeIR[];
   zones: { id: string; title: string }[];
 };
-export type DiagramIR = FlowIR;
+/** How a message is drawn: its line, and what its arrow ends in. A dashed
+ * line is a reply, never a boundary, so it takes no colour. */
+export type SeqLine = "solid" | "dashed";
+export type SeqHead = "filled" | "open" | "none" | "cross" | "both";
+export type SeqRow =
+  | {
+      type: "message";
+      from: string;
+      to: string;
+      label: string;
+      line: SeqLine;
+      head: SeqHead;
+    }
+  | {
+      type: "note";
+      /** The lifelines it sits over, or the one it sits beside. */
+      from: string;
+      to: string;
+      side: "over" | "left" | "right";
+      label: string;
+    }
+  /** A frame opens (`alt`, `loop`, `par` ...), is split by a divider
+   * (`else`, `and`, `option`) and closes at `end`. */
+  | { type: "frame"; keyword: string; label: string }
+  | { type: "divider"; keyword: string; label: string }
+  | { type: "end" };
+export type SequenceIR = {
+  kind: "sequence";
+  actors: { id: string; label: string }[];
+  /** Top to bottom, in the order the source wrote them. */
+  rows: SeqRow[];
+};
+export type DiagramIR = FlowIR | SequenceIR;
 
 /** The largest diagram drawn editorially. The prompt asks for at most 12
  * nodes; past this the layout stops reading as composed, and the renderer's
  * own drawing is no worse than a crowded one of ours. */
 const maxNodes = 16;
 const maxEdges = 24;
+/** The prompt asks for at most 5 participants and 12 messages; the same
+ * slack over it as a flow gets. Wider than this a sequence is too small to
+ * read inline in either drawing, and the renderer's is the wider one. */
+const maxActors = 8;
+const maxRows = 20;
 
 export function fits(ir: DiagramIR): boolean {
+  if (ir.kind === "sequence") {
+    const rows = ir.rows.filter(
+      (r) => r.type === "message" || r.type === "note",
+    );
+    return ir.actors.length <= maxActors && rows.length <= maxRows;
+  }
   return ir.nodes.length <= maxNodes && ir.edges.length <= maxEdges;
 }
 
@@ -56,6 +99,7 @@ export function fits(ir: DiagramIR): boolean {
 export function toIR(type: string, db: unknown): DiagramIR | null {
   try {
     if (type === "flowchart-v2" || type === "flowchart") return flowIR(db);
+    if (type === "sequence") return sequenceIR(db);
   } catch {
     // A db missing an accessor this reads is a renderer that moved on; the
     // renderer then draws the source itself.
@@ -157,6 +201,127 @@ function flowIR(db: unknown): FlowIR | null {
       .filter((s) => nodes.some((n) => n.zone === s.id))
       .map((s) => ({ id: s.id, title: plain(s.title ?? "") })),
   };
+}
+
+type SequenceDb = {
+  getActors(): Map<string, { name?: string; description?: string }>;
+  getMessages(): {
+    from?: string;
+    to?: string;
+    type?: number;
+    message?: string;
+    placement?: number;
+  }[];
+  getBoxes(): unknown[];
+  getCreatedActors(): Map<string, unknown>;
+  getDestroyedActors(): Map<string, unknown>;
+  showSequenceNumbers(): boolean;
+};
+
+function isSequenceDb(db: unknown): db is SequenceDb {
+  if (typeof db !== "object" || db === null) return false;
+  const d = db as Record<string, unknown>;
+  return [
+    "getActors",
+    "getMessages",
+    "getBoxes",
+    "getCreatedActors",
+    "getDestroyedActors",
+    "showSequenceNumbers",
+  ].every((k) => typeof d[k] === "function");
+}
+
+/** The renderer's line types (its LINETYPE table), the ones drawn. */
+const arrows: Record<number, [SeqLine, SeqHead]> = {
+  0: ["solid", "filled"],
+  1: ["dashed", "filled"],
+  3: ["solid", "cross"],
+  4: ["dashed", "cross"],
+  5: ["solid", "none"],
+  6: ["dashed", "none"],
+  24: ["solid", "open"],
+  25: ["dashed", "open"],
+  33: ["solid", "both"],
+  34: ["dashed", "both"],
+};
+const note = 2;
+const frames: Record<number, string> = {
+  10: "loop",
+  12: "alt",
+  15: "opt",
+  19: "par",
+  27: "critical",
+  30: "break",
+};
+const dividers: Record<number, string> = {
+  13: "else",
+  20: "and",
+  28: "option",
+};
+const ends = new Set([11, 14, 16, 21, 29, 31]);
+/** activate and deactivate: a bar on the lifeline, which this does not
+ * draw, and nothing else changes. */
+const ignored = new Set([17, 18]);
+const sides = ["left", "right", "over"] as const;
+
+function sequenceIR(db: unknown): SequenceIR | null {
+  if (!isSequenceDb(db)) return null;
+  // Groups of participants, participants arriving or leaving mid-way and
+  // numbered messages are pictures this does not draw.
+  if (
+    db.getBoxes().length > 0 ||
+    db.getCreatedActors().size > 0 ||
+    db.getDestroyedActors().size > 0 ||
+    db.showSequenceNumbers()
+  )
+    return null;
+  const actors: SequenceIR["actors"] = [];
+  for (const [id, a] of db.getActors()) {
+    if (typeof id !== "string" || id === "") continue;
+    actors.push({ id, label: plain(a.description ?? a.name ?? "") || id });
+  }
+  if (actors.length === 0) return null;
+  const known = new Set(actors.map((a) => a.id));
+  const rows: SeqRow[] = [];
+  let open = false;
+  for (const m of db.getMessages()) {
+    const t = m.type ?? -1;
+    const label = plain(m.message ?? "");
+    if (t in arrows) {
+      if (!known.has(m.from ?? "") || !known.has(m.to ?? "")) continue;
+      const [line, head] = arrows[t];
+      rows.push({
+        type: "message",
+        from: m.from!,
+        to: m.to!,
+        label,
+        line,
+        head,
+      });
+    } else if (t === note) {
+      if (!known.has(m.from ?? "") || !known.has(m.to ?? "")) continue;
+      const side = sides[m.placement ?? 2] ?? "over";
+      rows.push({ type: "note", from: m.from!, to: m.to!, side, label });
+    } else if (t in frames) {
+      // A frame inside a frame nests, and nesting is a picture this does
+      // not draw.
+      if (open) return null;
+      open = true;
+      rows.push({ type: "frame", keyword: frames[t], label });
+    } else if (t in dividers) {
+      if (!open) return null;
+      rows.push({ type: "divider", keyword: dividers[t], label });
+    } else if (ends.has(t)) {
+      if (!open) return null;
+      open = false;
+      rows.push({ type: "end" });
+    } else if (!ignored.has(t)) {
+      // rect, par_over, and whatever a later renderer adds.
+      return null;
+    }
+  }
+  if (open) return null;
+  return { kind: "sequence", actors, rows };
 }
 
 function headOf(type: string): FlowEdgeIR["head"] {

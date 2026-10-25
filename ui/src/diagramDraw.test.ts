@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { drawFlow, shorten } from "./diagramDraw";
+import { drawFlow, drawSequence, shorten } from "./diagramDraw";
+import type { SeqRow } from "./diagramIR";
 import type { FlowLayout, NodeBox } from "./diagramLayout";
+import { layoutSequence } from "./diagramSequence";
 import type { Palette } from "./diagramTheme";
 
 const pal: Palette = {
@@ -194,3 +196,118 @@ describe("shorten", () => {
     expect(shorten(pts, false, 40)).toEqual(pts);
   });
 });
+
+describe("drawSequence", () => {
+  const seqLayout = () =>
+    layoutSequence({
+      kind: "sequence",
+      actors: [
+        { id: "a", label: "Answerer" },
+        { id: "b", label: "llmwire" },
+        { id: "c", label: '</text><script>alert("x")</script>' },
+      ],
+      rows: [
+        { type: "frame", keyword: "alt", label: "nothing delivered" },
+        msg("a", "c", "call"),
+        { type: "divider", keyword: "else", label: "delivered" },
+        msg("c", "a", "reply", { line: "dashed" }),
+        { type: "end" },
+        msg("a", "b", "async", { head: "open" }),
+        msg("a", "b", "lost", { head: "cross" }),
+        msg("a", "b", "", { head: "none" }),
+        msg("b", "b", "self"),
+        { type: "note", from: "a", to: "b", side: "over", label: "a note" },
+      ],
+    });
+
+  it("writes a standalone SVG at its own size, model text as text", () => {
+    const l = seqLayout();
+    const doc = parse(drawSequence(l, pal, "s"));
+    expect(doc.querySelector("parsererror")).toBeNull();
+    expect(doc.documentElement.getAttribute("viewBox")).toBe(
+      `0 0 ${l.width} ${l.height}`,
+    );
+    expect(doc.querySelector("script")).toBeNull();
+    expect(
+      [...doc.querySelectorAll("text")].map((t) => t.textContent),
+    ).toContain('</text><script>alert("x")</script>');
+  });
+
+  it("dashes lifelines and replies, and ends each arrow in its own head", () => {
+    const doc = parse(drawSequence(seqLayout(), pal, "s"));
+    const lifelines = [...doc.querySelectorAll("line")].filter(
+      (x) => x.getAttribute("x1") === x.getAttribute("x2"),
+    );
+    expect(lifelines).toHaveLength(3);
+    for (const x of lifelines)
+      expect(x.getAttribute("stroke-dasharray")).toBe("4 4");
+    const arrows = [...doc.querySelectorAll("polyline")];
+    expect(arrows.map((p) => p.getAttribute("marker-end"))).toEqual([
+      "url(#s-arrow)",
+      "url(#s-arrow)",
+      "url(#s-open)",
+      "url(#s-cross)",
+      null,
+      "url(#s-arrow)",
+    ]);
+    expect(arrows.map((p) => p.getAttribute("stroke-dasharray"))).toEqual([
+      null,
+      "5 4",
+      null,
+      null,
+      null,
+      null,
+    ]);
+    for (const p of arrows) expect(p.getAttribute("stroke")).toBe(pal.muted);
+    expect(doc.querySelectorAll("marker")).toHaveLength(3);
+  });
+
+  it("uses no accent and no amber", () => {
+    const svg = drawSequence(seqLayout(), pal, "s");
+    expect(svg).not.toContain(pal.accent);
+    expect(svg).not.toContain(pal.warn);
+  });
+
+  it("puts every text on a patch of its ground, the frame's tint inside a frame", () => {
+    const doc = parse(drawSequence(seqLayout(), pal, "s"));
+    const patchOf = (word: string) => {
+      const t = [...doc.querySelectorAll("text")].find(
+        (x) => x.textContent === word,
+      )!;
+      const prev = t.previousElementSibling!;
+      expect(prev.tagName).toBe("rect");
+      return prev.getAttribute("fill");
+    };
+    expect(patchOf("call")).toBe(pal.tint);
+    expect(patchOf("async")).toBe(pal.surface);
+    expect(patchOf("delivered")).toBe(pal.tint);
+  });
+
+  it("titles a frame with its keyword, then its condition in the muted", () => {
+    const doc = parse(drawSequence(seqLayout(), pal, "s"));
+    const title = [...doc.querySelectorAll("text")].find((t) =>
+      t.textContent?.startsWith("alt"),
+    )!;
+    expect(title.getAttribute("font-weight")).toBe("600");
+    const cond = title.querySelector("tspan")!;
+    expect(cond.textContent).toBe("nothing delivered");
+    expect(cond.getAttribute("fill")).toBe(pal.muted);
+  });
+});
+
+function msg(
+  from: string,
+  to: string,
+  label: string,
+  over: Partial<Extract<SeqRow, { type: "message" }>> = {},
+): SeqRow {
+  return {
+    type: "message",
+    from,
+    to,
+    label,
+    line: "solid",
+    head: "filled",
+    ...over,
+  };
+}

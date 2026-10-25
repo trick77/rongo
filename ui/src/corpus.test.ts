@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import mermaid from "mermaid";
 import ELK from "elkjs/lib/elk.bundled.js";
-import { diagramKind, diagramSource } from "./diagram";
+import { diagramKind, diagramSource, ownKinds } from "./diagram";
 import { escapeAngles } from "./diagramText";
 import { fenceRe } from "./markdown";
-import { fits, toIR } from "./diagramIR";
+import { fits, toIR, type DiagramIR } from "./diagramIR";
 import { layoutFlow } from "./diagramLayout";
-import { check } from "./diagramCheck";
+import { layoutSequence } from "./diagramSequence";
+import { check, checkSequence } from "./diagramCheck";
 import { editorial } from "./editorial";
 
 /**
@@ -72,11 +73,26 @@ describe("the diagram corpus", () => {
   }
 });
 
-/** Which drawing each kind gets. A flowchart is rongo's own; every other
- * kind is the renderer's until rongo draws it. Asserted per answer, so a
- * flowchart that quietly falls back to the renderer fails here rather than
- * looking like it always did. */
-const own = new Set(["flowchart", "graph"]);
+/** Which drawing each answer gets: rongo's own for the kinds it draws
+ * (ownKinds), the renderer's for the rest, and the renderer's for the
+ * answers below, which hold a construct rongo declines on purpose. Asserted
+ * per answer, so a diagram that quietly falls back to the renderer fails
+ * here rather than looking like it always did. */
+const declined = new Set(["sequence-nested.golden"]);
+
+/** labels is every text an IR draws, for the bracket count. */
+function labels(ir: DiagramIR): string[] {
+  if (ir.kind === "sequence")
+    return [
+      ...ir.actors.map((a) => a.label),
+      ...ir.rows.map((r) => ("label" in r ? r.label : "")),
+    ];
+  return [
+    ...ir.nodes.map((n) => n.label),
+    ...ir.edges.map((e) => e.label),
+    ...ir.zones.map((z) => z.title),
+  ];
+}
 
 describe("rongo's drawing of the corpus", () => {
   beforeAll(() => {
@@ -88,16 +104,16 @@ describe("rongo's drawing of the corpus", () => {
     it(`draws ${name} with the drawing its kind gets`, async () => {
       const src = fence(text)!.body;
       const svg = await editorial(mermaid, escapeAngles(src), "corpus");
-      if (own.has(diagramKind(src))) {
-        expect(svg, "rongo declined a flowchart").toMatch(/^<svg /);
+      if (ownKinds.has(diagramKind(src)) && !declined.has(name)) {
+        expect(svg, "rongo declined a kind it draws").toMatch(/^<svg /);
       } else {
-        expect(svg, "rongo drew a kind it has no drawing for").toBeNull();
+        expect(svg, "rongo drew what the renderer should").toBeNull();
       }
     });
 
     it(`keeps every angle bracket ${name}'s labels hold`, async () => {
       const src = fence(text)!.body;
-      if (!own.has(diagramKind(src))) return;
+      if (!ownKinds.has(diagramKind(src))) return;
       // Every bracket the escape turned into text reaches a drawn label, and
       // nothing of the escaping is left in one.
       const escaped = escapeAngles(src);
@@ -110,11 +126,7 @@ describe("rongo's drawing of the corpus", () => {
       const d = await mermaid.mermaidAPI.getDiagramFromText(escaped);
       const ir = toIR(d.type, d.db);
       if (ir === null) return;
-      const drawn = [
-        ...ir.nodes.map((n) => n.label),
-        ...ir.edges.map((e) => e.label),
-        ...ir.zones.map((z) => z.title),
-      ].join("");
+      const drawn = labels(ir).join("");
       expect((drawn.match(/[<>]/g) ?? []).length).toBe(kept);
       expect(drawn).not.toMatch(/#lt;|#gt;|ﬂ°|¶ß/);
     });
@@ -124,6 +136,10 @@ describe("rongo's drawing of the corpus", () => {
       const d = await mermaid.mermaidAPI.getDiagramFromText(escapeAngles(src));
       const ir = toIR(d.type, d.db);
       if (ir === null || !fits(ir)) return;
+      if (ir.kind === "sequence") {
+        expect(checkSequence(layoutSequence(ir))).toEqual([]);
+        return;
+      }
       expect(check(await layoutFlow(ir, new ELK()))).toEqual([]);
     });
   }
