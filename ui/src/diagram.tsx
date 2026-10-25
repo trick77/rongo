@@ -1,4 +1,10 @@
-import { useRef, useState, type ReactNode } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { useResolved } from "./useResolved";
 import { download, fileName, toMermaid, toSvgFile } from "./diagramExport";
 import DiagramView from "./DiagramView";
@@ -303,7 +309,29 @@ function init(mermaid: Mermaid): void {
   });
 }
 
-export type Drawn = { svg: string } | { error: string };
+/** A drawing, and whose: `own` is rongo's (editorial.ts), drawn at its
+ * natural width on a canvas of its own; otherwise the renderer's, scaled into
+ * the card. */
+export type Drawn = { svg: string; own?: true } | { error: string };
+
+/** The kinds rongo draws itself; every other kind is the renderer's. */
+export const ownKinds: ReadonlySet<string> = new Set(["flowchart", "graph"]);
+
+/** ours is rongo's drawing of a parsed source, or null where it has none.
+ * Anything going wrong in it — the chunk gone after a redeploy, a layout
+ * that throws — is a reason to let the renderer draw, never a failed
+ * picture. */
+async function ours(mermaid: Mermaid, src: string): Promise<string | null> {
+  // Asked by kind before anything loads: a sequence or an entity diagram
+  // never fetches the layout engine or parses its source a second time.
+  if (!ownKinds.has(diagramKind(src))) return null;
+  try {
+    const { editorial } = await import("./editorial");
+    return await editorial(mermaid, src, `rongo-diagram-${++seq}`);
+  } catch {
+    return null;
+  }
+}
 
 /** One drawing per source text, however many times the answer re-renders.
  * The stream re-renders on every token, and a closed fence is drawn once.
@@ -327,6 +355,11 @@ export function draw(src: string): Promise<Drawn> {
     p = (async (): Promise<Drawn> => {
       try {
         const mermaid = await renderer();
+        // rongo's drawing first: its own parse is the only one a flowchart
+        // pays for. A source it cannot parse is declined like any other and
+        // meets the renderer's parse below, which says why.
+        const own = await ours(mermaid, src);
+        if (own !== null) return { svg: own, own: true };
         await mermaid.parse(src);
         const { svg } = await mermaid.render(`rongo-diagram-${++seq}`, src);
         return { svg };
@@ -381,6 +414,7 @@ export default function Diagram({ src }: { src: string }): ReactNode {
   const [full, setFull] = useState(false);
   const card = useRef<HTMLDivElement>(null);
   const title = diagramTitle(src);
+  const pane = usePane(card, out !== null && "own" in out);
 
   if (out === null) return <DiagramPending />;
   if ("error" in out) {
@@ -398,14 +432,54 @@ export default function Diagram({ src }: { src: string }): ReactNode {
     download(fileName(src), toSvgFile(out as { svg: string }, card.current));
   }
 
+  // rongo's own drawing brings its canvas, so the card is only a frame for
+  // the two buttons. It starts where the text starts and is as wide as the
+  // drawing, out to the thread pane (spread), by margins: a transform would
+  // trap the full view's fixed overlay. Where there is no pane to measure, it
+  // stays in the text's width and scrolls there.
+  if (out.own) {
+    const at = pane === null ? null : spread(pane, svgWidth(out.svg));
+    return (
+      <div className="mt-3" style={at ?? undefined}>
+        <div ref={card} className="relative w-max max-w-full">
+          {tools(false)}
+          <div className="rongo-diagram-natural overflow-x-auto">
+            <MermaidSvg svg={out.svg} title={title} />
+          </div>
+          {full && (
+            <DiagramView
+              src={src}
+              svg={out.svg}
+              onClose={() => setFull(false)}
+            />
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={card}
       className="relative mt-3 rounded-ui-sm border border-border bg-panel p-3"
     >
-      {/* Always drawn, never revealed on hover: a phone has no hover, and the
-          full view is the only way it can see a wide diagram whole. */}
-      <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 bg-gradient-to-l from-panel from-70% to-transparent pl-6">
+      {tools(true)}
+      <MermaidSvg svg={out.svg} title={title} />
+      {full && (
+        <DiagramView src={src} svg={out.svg} onClose={() => setFull(false)} />
+      )}
+    </div>
+  );
+
+  /** tools is the full view and the file. Always drawn, never revealed on
+   * hover: a phone has no hover, and the full view is the only way it can
+   * see a wide diagram whole. On the renderer's drawing they sit on a fade
+   * of the card; on rongo's they sit in its canvas margin, which is clear. */
+  function tools(fade: boolean) {
+    return (
+      <div
+        className={`absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 ${fade ? "bg-gradient-to-l from-panel from-70% to-transparent pl-6" : ""}`}
+      >
         <button
           type="button"
           onClick={() => setFull(true)}
@@ -425,12 +499,78 @@ export default function Diagram({ src }: { src: string }): ReactNode {
           <DownloadIcon />
         </button>
       </div>
-      <MermaidSvg svg={out.svg} title={title} />
-      {full && (
-        <DiagramView src={src} svg={out.svg} onClose={() => setFull(false)} />
-      )}
-    </div>
-  );
+    );
+  }
+}
+
+/** usePane measures the room a drawing has: the text it sits in, and how far
+ * the thread pane (the element marked data-diagram-pane) reaches past it on
+ * either side, kept current as either resizes: the rail dragged, the
+ * Sources pane opened. Null where there is no such pane or nothing to
+ * measure for. */
+function usePane(
+  card: RefObject<HTMLDivElement | null>,
+  active: boolean,
+): Room | null {
+  const [room, setRoom] = useState<Room | null>(null);
+  useLayoutEffect(() => {
+    const host = card.current?.closest<HTMLElement>("[data-diagram-pane]");
+    const text = card.current?.parentElement?.parentElement;
+    if (!active || !host || !text) return;
+    const measure = () => {
+      // A pane laid out at no width (not on screen yet) gives no measure.
+      if (host.clientWidth === 0) return setRoom(null);
+      const paneLeft = host.getBoundingClientRect().left + host.clientLeft;
+      const t = text.getBoundingClientRect();
+      const next = {
+        width: t.width,
+        left: Math.max(0, t.left - (paneLeft + gutter)),
+        right: Math.max(0, paneLeft + host.clientWidth - gutter - t.right),
+      };
+      // The text grows a line at a time while an answer streams, which the
+      // observer reports; unchanged room is no reason to draw again.
+      setRoom((prev) =>
+        prev &&
+        prev.width === next.width &&
+        prev.left === next.left &&
+        prev.right === next.right
+          ? prev
+          : next,
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(host);
+    ro.observe(text);
+    return () => ro.disconnect();
+  }, [card, active]);
+  return active ? room : null;
+}
+
+/** The space a drawing may take: the width of the text it sits in, and how
+ * far the pane reaches past it on either side, less a gutter. */
+type Room = { width: number; left: number; right: number };
+const gutter = 16;
+
+/** spread is where a drawing svgW wide sits: in the text's own width when
+ * it fits, else growing into the room on the right first — prose reads from
+ * the left, so that is where the space is — then the left. Past both it
+ * keeps the widest frame and scrolls. */
+export function spread(
+  room: Room,
+  svgW: number,
+): { marginLeft: number; width: number } | null {
+  const extra = svgW - room.width;
+  if (extra <= 0) return null;
+  const right = Math.min(extra, room.right);
+  const left = Math.min(extra - right, room.left);
+  return { marginLeft: -left, width: room.width + left + right };
+}
+
+/** svgWidth is the width a drawing states on its root element. */
+function svgWidth(svg: string): number {
+  return Number(/<svg\b[^>]*\swidth="(\d+(?:\.\d+)?)"/.exec(svg)?.[1] ?? 0);
 }
 
 /** The box a diagram's place holds while the picture is still being drawn,
