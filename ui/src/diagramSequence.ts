@@ -83,11 +83,6 @@ export type SequenceLayout = {
 
 /** Space around the drawing, inside the canvas. */
 const margin = 24;
-/** Clear canvas above the participants. The card's full-view and file
- * buttons sit in the canvas's top right corner, where a flow leaves margin
- * and a sequence puts its last participant; at the scale a five-participant
- * sequence is drawn inline they covered that box's name. */
-const toolsBand = 32;
 /** Text to frame, each side, in a participant box. */
 export const boxPad = 16;
 const boxMin = 96;
@@ -237,8 +232,10 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
   /** floor: the highest a divider may sit, clear of the title or the
    * divider text above it when no row came between. */
   type Open = { f: SeqFrame; cols: Set<number>; boxes: Box[]; floor: number };
-  let open: Open | null = null;
-  const top = margin + toolsBand + headH;
+  // Open frames, innermost last: a row belongs to the innermost, and a
+  // closed frame is a box its parent must hold.
+  const stack: Open[] = [];
+  const top = margin + headH;
   let y = top + 24;
 
   ir.rows.forEach((r, k) => {
@@ -251,7 +248,7 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
         to: r.to,
         dashed: r.line === "dashed",
         head: r.head,
-        framed: open !== null,
+        framed: stack.length > 0,
       };
       let m: SeqMessage;
       if (i === j) {
@@ -289,6 +286,7 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
         y = lineY + rowGap;
       }
       messages.push(m);
+      const open = stack.at(-1);
       if (open) {
         open.cols.add(i).add(j);
         if (m.label) open.boxes.push(m.label);
@@ -312,6 +310,7 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
       const note: SeqNote = { lines: tw.lines, x, y, w, h };
       if (r.side !== "over") note.beside = r.from;
       notes.push(note);
+      const open = stack.at(-1);
       if (open) {
         open.cols.add(i).add(j);
         open.boxes.push(note);
@@ -344,11 +343,14 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
         },
         dividers: [],
       };
+      // Pushed when it opens, so an outer frame paints before the frames
+      // inside it.
       frames.push(f);
       const floor = f.title.y + h + dividerGap;
-      open = { f, cols: new Set(), boxes: [], floor };
+      stack.push({ f, cols: new Set(), boxes: [], floor });
       y += 2 * titlePad + h;
-    } else if (r.type === "divider" && open) {
+    } else if (r.type === "divider" && stack.length > 0) {
+      const open = stack.at(-1)!;
       const lineY = Math.max(y - rowGap / 2, open.floor);
       if (r.label !== "") {
         const lt = text(r.label, condMax, condStyle);
@@ -361,7 +363,8 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
         open.floor = lineY + dividerGap;
         y = lineY + 12;
       }
-    } else if (r.type === "end" && open) {
+    } else if (r.type === "end" && stack.length > 0) {
+      const open = stack.pop()!;
       const f = open.f;
       f.h = y - rowGap / 2 + 6 - f.y;
       const cols = open.cols.size > 0 ? [...open.cols] : xs.map((_, i) => i);
@@ -379,7 +382,12 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
       f.w = x1 - x0;
       f.title.x = x0 + titleInset;
       for (const d of f.dividers) if (d.label) d.label.x = x0 + titleInset;
-      open = null;
+      // The frame it sits in holds it whole, inset as it holds a label.
+      const parent = stack.at(-1);
+      if (parent) {
+        for (const c of cols) parent.cols.add(c);
+        parent.boxes.push(f);
+      }
       y = f.y + f.h + rowGap;
     }
   });
@@ -392,7 +400,7 @@ export function layoutSequence(ir: SequenceIR): SequenceLayout {
     size: h.size,
     bold: h.bold,
     x: xs[i] - h.w / 2,
-    y: margin + toolsBand,
+    y: margin,
     w: h.w,
     h: headH,
   }));

@@ -286,12 +286,40 @@ describe("toIR for a sequence", () => {
     expect(s.rows.map((r) => r.type)).toEqual(["message"]);
   });
 
-  it("declines a frame inside a frame", async () => {
-    expect(
-      await ir(`sequenceDiagram
+  it("reads frames inside frames, three deep", async () => {
+    const s = await sequence(`sequenceDiagram
   loop again
     alt ok
-      A->>B: x
+      opt cached
+        A->>B: x
+      end
+    else failed
+      B-->>A: y
+    end
+  end`);
+    expect(s.rows.map((r) => r.type)).toEqual([
+      "frame",
+      "frame",
+      "frame",
+      "message",
+      "end",
+      "divider",
+      "message",
+      "end",
+      "end",
+    ]);
+  });
+
+  it("declines frames four deep", async () => {
+    expect(
+      await ir(`sequenceDiagram
+  loop a
+    loop b
+      loop c
+        loop d
+          A->>B: x
+        end
+      end
     end
   end`),
     ).toBeNull();

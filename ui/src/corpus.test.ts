@@ -74,11 +74,9 @@ describe("the diagram corpus", () => {
 });
 
 /** Which drawing each answer gets: rongo's own for the kinds it draws
- * (ownKinds), the renderer's for the rest, and the renderer's for the
- * answers below, which hold a construct rongo declines on purpose. Asserted
- * per answer, so a diagram that quietly falls back to the renderer fails
- * here rather than looking like it always did. */
-const declined = new Set(["sequence-nested.golden"]);
+ * (ownKinds), the renderer's for the rest. Asserted per answer, so a
+ * diagram that quietly falls back to the renderer fails here rather than
+ * looking like it always did. */
 
 /** labels is every text an IR draws, for the bracket count. */
 function labels(ir: DiagramIR): string[] {
@@ -104,7 +102,7 @@ describe("rongo's drawing of the corpus", () => {
     it(`draws ${name} with the drawing its kind gets`, async () => {
       const src = fence(text)!.body;
       const svg = await editorial(mermaid, escapeAngles(src), "corpus");
-      if (ownKinds.has(diagramKind(src)) && !declined.has(name)) {
+      if (ownKinds.has(diagramKind(src))) {
         expect(svg, "rongo declined a kind it draws").toMatch(/^<svg /);
       } else {
         expect(svg, "rongo drew what the renderer should").toBeNull();
