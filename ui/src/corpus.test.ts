@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import mermaid from "mermaid";
 import ELK from "elkjs/lib/elk.bundled.js";
 import { diagramKind, diagramSource } from "./diagram";
+import { escapeAngles } from "./diagramText";
 import { fenceRe } from "./markdown";
 import { fits, toIR } from "./diagramIR";
 import { layoutFlow } from "./diagramLayout";
@@ -59,6 +60,14 @@ describe("the diagram corpus", () => {
       expect(f, "the backend left no diagram fence").not.toBeNull();
       const ok = await mermaid.parse(f!.body, { suppressErrors: true });
       expect(ok, `the renderer refuses:\n${f!.body}`).toBeTruthy();
+      // draw() parses the source with its brackets kept as text; one it
+      // cannot parse falls back and loses them, which must show here.
+      const escaped = escapeAngles(f!.body);
+      const okEscaped = await mermaid.parse(escaped, { suppressErrors: true });
+      expect(
+        okEscaped,
+        `the escaped source is refused:\n${escaped}`,
+      ).toBeTruthy();
     });
   }
 });
@@ -78,7 +87,7 @@ describe("rongo's drawing of the corpus", () => {
     const name = path.slice(path.lastIndexOf("/") + 1);
     it(`draws ${name} with the drawing its kind gets`, async () => {
       const src = fence(text)!.body;
-      const svg = await editorial(mermaid, src, "corpus");
+      const svg = await editorial(mermaid, escapeAngles(src), "corpus");
       if (own.has(diagramKind(src))) {
         expect(svg, "rongo declined a flowchart").toMatch(/^<svg /);
       } else {
@@ -86,9 +95,33 @@ describe("rongo's drawing of the corpus", () => {
       }
     });
 
+    it(`keeps every angle bracket ${name}'s labels hold`, async () => {
+      const src = fence(text)!.body;
+      if (!own.has(diagramKind(src))) return;
+      // Every bracket the escape turned into text reaches a drawn label, and
+      // nothing of the escaping is left in one.
+      const escaped = escapeAngles(src);
+      // Tooltips, links and styles are escaped too but never drawn as a label.
+      const labelled = escaped
+        .split("\n")
+        .filter((l) => !/^\s*(click|classDef|class|style|linkStyle)\b/.test(l))
+        .join("\n");
+      const kept = (labelled.match(/#lt;|#gt;/g) ?? []).length;
+      const d = await mermaid.mermaidAPI.getDiagramFromText(escaped);
+      const ir = toIR(d.type, d.db);
+      if (ir === null) return;
+      const drawn = [
+        ...ir.nodes.map((n) => n.label),
+        ...ir.edges.map((e) => e.label),
+        ...ir.zones.map((z) => z.title),
+      ].join("");
+      expect((drawn.match(/[<>]/g) ?? []).length).toBe(kept);
+      expect(drawn).not.toMatch(/#lt;|#gt;|ﬂ°|¶ß/);
+    });
+
     it(`lays out ${name} by the connector rules`, async () => {
       const src = fence(text)!.body;
-      const d = await mermaid.mermaidAPI.getDiagramFromText(src);
+      const d = await mermaid.mermaidAPI.getDiagramFromText(escapeAngles(src));
       const ir = toIR(d.type, d.db);
       if (ir === null || !fits(ir)) return;
       expect(check(await layoutFlow(ir, new ELK()))).toEqual([]);
