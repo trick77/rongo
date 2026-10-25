@@ -87,10 +87,10 @@ type Config struct {
 	GateTemperature *float64
 	// AnswerReasoning is the effort level answer-lane calls send
 	// (BACKEND_LLM_REASONING); empty sends none, and the model runs at its own
-	// default, unless that call's cap would outrun config.DefaultLLMTimeout:
-	// then llmwire's Balanced intent (see request). NewClient refuses a level
-	// the answer model's profile does not list. A call asked not to think
-	// (WithoutThinking) still sends minimal.
+	// default, unless that call's cap would outrun Timeout: then llmwire's
+	// Balanced intent where it is shorter (see request). NewClient refuses a
+	// level the answer model's profile does not list. A call asked not to
+	// think (WithoutThinking) still sends minimal.
 	AnswerReasoning string
 	// Registry and Lookup replace llmwire's shipped profiles and the process
 	// environment. Tests only; nil in production.
@@ -354,11 +354,16 @@ type Client struct {
 	answer, gate    string
 	gateTemperature *float64
 	answerReasoning string
-	// answerNoKnob is the answer model's reasoning allowance with no knob
-	// sent, answerMaxOutput its output limit (0 = none); see noKnobCap.
+	// answerNoKnob and answerBalanced are the answer model's reasoning
+	// allowance with no knob and with Balanced, answerMaxOutput its output
+	// limit (0 = none); see planCap.
 	answerNoKnob    int
+	answerBalanced  int
 	answerMaxOutput int64
-	turnMaxTokens   int
+	// answerBound is the most tokens a call streams inside the call timeout;
+	// see streamBound.
+	answerBound   int
+	turnMaxTokens int
 	// demoted records the features warn has already reported, keyed by
 	// feature name; see warn.
 	demoted sync.Map
@@ -425,12 +430,18 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	if _, err := requireLane(reg, "BACKEND_LLM_GATE_MODEL", gate, gateNeeds); err != nil {
 		return nil, err
 	}
+	// The call timeout llmwire enforces is the one the Balanced bound reads.
+	// Zero is config.DefaultLLMTimeout, llmwire's own default too.
+	callTimeout := cfg.Timeout
+	if callTimeout <= 0 {
+		callTimeout = config.DefaultLLMTimeout
+	}
 	wire, err := llmwire.FromEnvModels(llmwire.Config{
 		BaseURL:       cfg.BaseURL,
 		APIKey:        cfg.APIKey,
 		HeaderTimeout: cfg.Timeout,
 		IdleTimeout:   cfg.IdleTimeout,
-		CallTimeout:   cfg.Timeout,
+		CallTimeout:   callTimeout,
 		HTTPClient:    hc,
 		Registry:      cfg.Registry,
 		Lookup:        cfg.Lookup,
@@ -446,14 +457,18 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 		gateTemperature: cfg.GateTemperature,
 		answerReasoning: cfg.AnswerReasoning,
 		answerNoKnob:    noKnobOverhead(answerProfile.Reasoning),
+		answerBalanced:  balancedOverhead(answerProfile.Reasoning),
 		answerMaxOutput: answerProfile.Limits.MaxOutput,
+		answerBound:     streamBound(callTimeout),
 		turnMaxTokens:   cfg.TurnMaxTokens,
 	}, nil
 }
 
-// streamBound is the most tokens a call streams inside config.DefaultLLMTimeout
-// at config.SlowestStreamTokensPerSecond.
-const streamBound = int(config.DefaultLLMTimeout/time.Second) * config.SlowestStreamTokensPerSecond
+// streamBound is the most tokens a call streams inside timeout at
+// config.SlowestStreamTokensPerSecond.
+func streamBound(timeout time.Duration) int {
+	return int(timeout/time.Second) * config.SlowestStreamTokensPerSecond
+}
 
 // noKnobOverhead is the reasoning allowance llmwire adds to MaxAnswerTokens
 // when no reasoning knob is sent. llmwire does not export its plan, so this
@@ -471,11 +486,27 @@ func noKnobOverhead(r llmwire.Reasoning) int {
 	return llmwire.DefaultReasoningOverhead
 }
 
+// balancedOverhead is the allowance llmwire adds for ReasoningBalanced(): the
+// balanced level's, or the no-knob one where the profile has no balanced
+// level and the intent sends nothing. Mirrored like noKnobOverhead.
+func balancedOverhead(r llmwire.Reasoning) int {
+	if !r.Supported || r.Balanced == "" {
+		return noKnobOverhead(r)
+	}
+	if n, ok := r.Overhead[r.Balanced]; ok {
+		return n
+	}
+	return llmwire.DefaultReasoningOverhead
+}
+
 // noKnobCap is the wire cap of an answer-lane call of budget answer that
-// sends no reasoning knob, clamped to the model's output limit as llmwire
-// clamps it.
-func (c *Client) noKnobCap(answer int) int {
-	n := int64(answer) + int64(c.answerNoKnob)
+// sends no reasoning knob.
+func (c *Client) noKnobCap(answer int) int { return c.planCap(answer, c.answerNoKnob) }
+
+// planCap is answer plus a reasoning allowance, clamped to the answer model's
+// output limit as llmwire clamps it.
+func (c *Client) planCap(answer, allowance int) int {
+	n := int64(answer) + int64(allowance)
 	if c.answerMaxOutput > 0 {
 		n = min(n, c.answerMaxOutput)
 	}
@@ -549,9 +580,9 @@ func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 	// Gate calls reason as little as the model allows. An answer-lane call is
 	// read by a person and runs at the level the deployment pinned, else at
 	// the model's own default (no knob) — unless the no-knob cap would not
-	// stream inside config.DefaultLLMTimeout, which is a hard cap: then
-	// Balanced, whose allowance is the level's. A profile with no balanced
-	// level still sends none; ask's
+	// stream inside the call timeout (Config.Timeout) and Balanced's cap is
+	// shorter: then Balanced. A model Balanced would not shorten keeps its
+	// default; at config.DefaultLLMTimeout ask's
 	// TestAnswerCap_fitsTheDefaultTimeoutOnEveryModel catches one that does
 	// not fit.
 	switch {
@@ -559,7 +590,8 @@ func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 		req.Reasoning = llmwire.ReasoningMinimal()
 	case o.lane == LaneAnswer && c.answerReasoning != "":
 		req.Reasoning = llmwire.ReasoningEffort(c.answerReasoning)
-	case o.lane == LaneAnswer && c.noKnobCap(o.maxTokens) > streamBound:
+	case o.lane == LaneAnswer && c.noKnobCap(o.maxTokens) > c.answerBound &&
+		c.planCap(o.maxTokens, c.answerBalanced) < c.noKnobCap(o.maxTokens):
 		req.Reasoning = llmwire.ReasoningBalanced()
 	}
 	// A pinned level was checked against the profile at boot, so it keeps

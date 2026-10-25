@@ -26,23 +26,28 @@ func TestRegistry_gateIsTheChatProfileOnItsOwnProvider(t *testing.T) {
 	}
 }
 
-func TestRegistry_deepIsTheChatProfileWithALongDefault(t *testing.T) {
+func TestRegistry_deepAndFlatAreTheChatProfileWithTheirOwnDefault(t *testing.T) {
 	a, err := Registry().Require(Answer, llmwire.Needs{Tools: true, Streaming: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := Registry().Require(Deep, llmwire.Needs{Tools: true, Streaming: true})
-	if err != nil {
-		t.Fatal(err)
+	for id, noKnob := range map[string]int{Deep: DeepNoKnobOverhead, Flat: FlatNoKnobOverhead} {
+		d, err := Registry().Require(id, llmwire.Needs{Tools: true, Streaming: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Provider != a.Provider || d.Reasoning.Balanced != a.Reasoning.Balanced {
+			t.Errorf("%s = %s/%q, want the answer's provider and balanced level", id, d.Provider, d.Reasoning.Balanced)
+		}
+		if got := d.Reasoning.Overhead["default"]; got != noKnob {
+			t.Errorf("%s no-knob overhead = %d, want %d", id, got, noKnob)
+		}
+		if d.Limits.MaxOutput != DeepMaxOutput {
+			t.Errorf("%s max output = %d, want %d", id, d.Limits.MaxOutput, DeepMaxOutput)
+		}
 	}
-	if d.Provider != a.Provider || d.Reasoning.Balanced != a.Reasoning.Balanced {
-		t.Errorf("deep = %s/%q, want the answer's provider and balanced level", d.Provider, d.Reasoning.Balanced)
-	}
-	if got := d.Reasoning.Overhead["default"]; got != DeepNoKnobOverhead {
-		t.Errorf("deep no-knob overhead = %d, want %d", got, DeepNoKnobOverhead)
-	}
-	if d.Limits.MaxOutput != DeepMaxOutput {
-		t.Errorf("deep max output = %d, want %d", d.Limits.MaxOutput, DeepMaxOutput)
+	if got := a.Reasoning.Overhead[a.Reasoning.Balanced]; got != FlatNoKnobOverhead {
+		t.Errorf("balanced overhead = %d, want Flat's no-knob %d", got, FlatNoKnobOverhead)
 	}
 }
 

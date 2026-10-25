@@ -92,7 +92,10 @@ func TestAnswerReasoning_isNoKnobUnlessItOutrunsTheDefaultTimeout(t *testing.T) 
 				}
 				return
 			}
-			p, _ := reg.Lookup(model)
+			p, err := reg.Lookup(model)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if got := sent.Reasoning(); got == "" || got != p.Reasoning.Balanced {
 				t.Errorf("no-knob cap %d outruns %d: reasoning = %q, want balanced (%q)", noKnobCap, budget, got, p.Reasoning.Balanced)
 			}
