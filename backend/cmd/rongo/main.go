@@ -575,7 +575,7 @@ func newModelClients(cfg config.Config, chat llm.Config) (*embed.Client, *llm.Cl
 	if cfg.LLMGateTemperature != nil {
 		gateTemp = fmt.Sprint(*cfg.LLMGateTemperature)
 	}
-	answerReasoning := "balanced"
+	answerReasoning := "unpinned (balanced intent)"
 	if cfg.LLMReasoning != "" {
 		answerReasoning = cfg.LLMReasoning
 	}

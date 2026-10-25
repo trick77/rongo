@@ -85,7 +85,8 @@ type Config struct {
 	// decision must not re-roll between runs. config.Load holds the default.
 	GateTemperature *float64
 	// AnswerReasoning is the effort level answer-lane calls send
-	// (BACKEND_LLM_REASONING); empty sends llmwire's Balanced intent. NewClient
+	// (BACKEND_LLM_REASONING); empty sends llmwire's Balanced intent (the
+	// profile's balanced level, else none). NewClient
 	// refuses a level the answer model's profile does not list. A call asked
 	// not to think (WithoutThinking) still sends minimal.
 	AnswerReasoning string
@@ -508,9 +509,11 @@ func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 	}
 	// Gate calls reason as little as the model allows. An answer-lane call is
 	// read by a person and runs at the level the deployment pinned, else at
-	// Balanced, never with no knob: a profile may give the no-knob default a
-	// far larger allowance (8192 on mimo-v2.6-flash), and the answer's cap
-	// plus that would outrun config.DefaultLLMTimeout.
+	// Balanced rather than no knob: a profile may give the no-knob default a
+	// far larger allowance, and the answer's cap plus that would outrun
+	// config.DefaultLLMTimeout. A profile with no balanced level still sends
+	// none; ask's TestAnswerCap_fitsTheDefaultTimeoutOnEveryModel catches one
+	// whose default allowance does not fit.
 	switch {
 	case o.thinkingOff:
 		req.Reasoning = llmwire.ReasoningMinimal()
