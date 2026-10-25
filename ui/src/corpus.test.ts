@@ -58,10 +58,16 @@ describe("the diagram corpus", () => {
     it(`draws ${name}`, async () => {
       const f = fence(text);
       expect(f, "the backend left no diagram fence").not.toBeNull();
-      const ok = await mermaid.parse(escapeAngles(f!.body), {
-        suppressErrors: true,
-      });
+      const ok = await mermaid.parse(f!.body, { suppressErrors: true });
       expect(ok, `the renderer refuses:\n${f!.body}`).toBeTruthy();
+      // draw() parses the source with its brackets kept as text; one it
+      // cannot parse falls back and loses them, which must show here.
+      const escaped = escapeAngles(f!.body);
+      const okEscaped = await mermaid.parse(escaped, { suppressErrors: true });
+      expect(
+        okEscaped,
+        `the escaped source is refused:\n${escaped}`,
+      ).toBeTruthy();
     });
   }
 });
@@ -92,18 +98,20 @@ describe("rongo's drawing of the corpus", () => {
     it(`keeps every angle bracket ${name}'s labels hold`, async () => {
       const src = fence(text)!.body;
       if (!own.has(diagramKind(src))) return;
-      const angles = (s: string) =>
-        (s.replace(/<br\s*\/?>/gi, "").match(/[<>]/g) ?? []).length;
-      const quoted = [...src.matchAll(/"([^"]*)"/g)].map((m) => m[1]);
-      const d = await mermaid.mermaidAPI.getDiagramFromText(escapeAngles(src));
+      // Every bracket the escape turned into text reaches a drawn label, and
+      // nothing of the escaping is left in one.
+      const escaped = escapeAngles(src);
+      const kept = (escaped.match(/#lt;|#gt;/g) ?? []).length;
+      const d = await mermaid.mermaidAPI.getDiagramFromText(escaped);
       const ir = toIR(d.type, d.db);
       if (ir === null) return;
       const drawn = [
         ...ir.nodes.map((n) => n.label),
         ...ir.edges.map((e) => e.label),
         ...ir.zones.map((z) => z.title),
-      ];
-      expect(angles(drawn.join(""))).toBe(angles(quoted.join("")));
+      ].join("");
+      expect((drawn.match(/[<>]/g) ?? []).length).toBe(kept);
+      expect(drawn).not.toMatch(/#lt;|#gt;|ﬂ°|¶ß/);
     });
 
     it(`lays out ${name} by the connector rules`, async () => {

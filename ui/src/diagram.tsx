@@ -2,6 +2,9 @@ import { useRef, useState, type ReactNode } from "react";
 import { useResolved } from "./useResolved";
 import { download, fileName, toMermaid, toSvgFile } from "./diagramExport";
 import { escapeAngles } from "./diagramText";
+import { diagramKind } from "./diagramKind";
+
+export { diagramKind };
 import DiagramView from "./DiagramView";
 import { DownloadIcon, ExpandIcon } from "./icons";
 
@@ -168,21 +171,6 @@ export function diagramSource(tag: string, body: string): string | null {
 /** specRe says a fence body opens as a legacy spec. Anchored on the brace, so
  * prose about the format inside a code block is not mistaken for one. */
 const specRe = /^\s*\{\s*"type"\s*:\s*"(?:flow|sequence)"/;
-
-/** diagramKind is the first word of the source, which is the diagram type in
- * mermaid's grammar: `flowchart`, `sequenceDiagram`, `stateDiagram-v2`. A
- * leading `%%{init}%%` directive or comment is skipped. Empty when there is
- * no such word, or when the word is not the shape of a type name; the
- * backend reads it the same way (renumber.go mermaidKind). */
-export function diagramKind(src: string): string {
-  for (const line of src.split("\n")) {
-    const t = line.trim();
-    if (t === "" || t.startsWith("%%")) continue;
-    const word = t.split(/\s+/)[0].replace(/[;:]$/, "");
-    return /^[A-Za-z][A-Za-z0-9-]*$/.test(word) ? word : "";
-  }
-  return "";
-}
 
 const titles: Record<string, string> = {
   flowchart: "Flow diagram",
@@ -360,8 +348,14 @@ export function draw(src: string): Promise<Drawn> {
         if (text !== src) {
           try {
             return await drawFrom(mermaid, text);
-          } catch {
-            // Drawn below from the source as written.
+          } catch (e) {
+            // A form escapeAngles does not know yet, drawn below from the
+            // source as written with its brackets lost as before. Said, so
+            // the gap shows.
+            console.warn(
+              "diagram: escaped source refused, drawn as written",
+              e,
+            );
           }
         }
         return await drawFrom(mermaid, src);
