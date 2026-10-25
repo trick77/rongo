@@ -1,0 +1,14 @@
+A checklist holds criteria, each evaluation records one finding per criterion, and the findings of a ticket are summarised in its result [1][3][4].
+
+```mermaid
+erDiagram
+    DorChecklist ||--o{ DorCriterion : "holds"
+    DorCriterion ||--o{ CriterionFinding : "judged as"
+    DorEvaluation ||--o{ CriterionFinding : "records"
+    Verdict ||--o{ CriterionFinding : "classifies"
+    CriterionFinding }o--o{ TicketResult : "summarised in"
+    TicketBrief ||--|| TicketResult : "yields"
+    TicketStatus ||--o{ TicketResult : "labels"
+```
+
+The checklist is loaded from `dor.yaml`, never from Jira [2].

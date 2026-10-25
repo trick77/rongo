@@ -1,5 +1,6 @@
 import type { FlowLayout, NodeBox, Point } from "./diagramLayout";
-import { titleRoom } from "./diagramLayout";
+import { dotted, titleRoom } from "./diagramLayout";
+import { markRoom, tablePad, type ERLayout } from "./diagramER";
 import {
   boxPad,
   nestInset,
@@ -54,18 +55,20 @@ export function check(l: FlowLayout): string[] {
     }
     const from = byId.get(e.from)!;
     const to = byId.get(e.to)!;
-    if (
+    const first = e.points[0];
+    const last = e.points[e.points.length - 1];
+    if (dotted(from.kind)) {
+      if (!onOutline(from, first)) out.push(`${name}: misses ${e.from}`);
+    } else if (
       from.kind !== "decision" &&
-      !perpendicular(from, e.points[0], e.points[1])
+      !perpendicular(from, first, e.points[1])
     )
       out.push(`${name}: leaves ${e.from} along its border`);
-    if (
+    if (dotted(to.kind)) {
+      if (!onOutline(to, last)) out.push(`${name}: misses ${e.to}`);
+    } else if (
       to.kind !== "decision" &&
-      !perpendicular(
-        to,
-        e.points[e.points.length - 1],
-        e.points[e.points.length - 2],
-      )
+      !perpendicular(to, last, e.points[e.points.length - 2])
     )
       out.push(`${name}: enters ${e.to} along its border`);
 
@@ -106,6 +109,36 @@ export function check(l: FlowLayout): string[] {
         out.push(`${name} and ${other}: labels overlap`);
     }
   });
+  return out;
+}
+
+/** checkER holds an entity model to the flow's connector rules, every text
+ * inside its table, and each line's ends straight for long enough to
+ * carry their cardinality marks. */
+export function checkER(l: ERLayout): string[] {
+  const out = check(l);
+  for (const n of l.nodes) {
+    const t = l.tables.get(n.id)!;
+    if (textWidth(t.name.text, t.name.size, t.name.face) > n.w - 2 * tablePad)
+      out.push(`${n.id}: its name overflows its table`);
+    for (const r of t.rows) {
+      for (const c of r.cells) {
+        for (const line of c.text) {
+          if (c.x + textWidth(line, c.size, c.face) > n.w - tablePad)
+            out.push(`${n.id}: "${line}" overflows its table`);
+        }
+      }
+    }
+  }
+  for (const e of l.edges) {
+    const p = e.points;
+    if (p.length < 2) continue;
+    const first = Math.hypot(p[1].x - p[0].x, p[1].y - p[0].y);
+    const n = p.length;
+    const last = Math.hypot(p[n - 1].x - p[n - 2].x, p[n - 1].y - p[n - 2].y);
+    if (Math.min(first, last) < markRoom)
+      out.push(`${e.from}->${e.to}: an end too short for its mark`);
+  }
   return out;
 }
 
@@ -234,6 +267,13 @@ function segments(points: Point[]): [Point, Point][] {
   const out: [Point, Point][] = [];
   for (let i = 1; i < points.length; i++) out.push([points[i - 1], points[i]]);
   return out;
+}
+
+/** onOutline says an end touches a dot's circle, within the rounding of a
+ * pixel either way. */
+function onOutline(n: NodeBox, p: Point): boolean {
+  const d = Math.hypot(p.x - (n.x + n.w / 2), p.y - (n.y + n.h / 2));
+  return Math.abs(d - n.w / 2) <= 1.5;
 }
 
 /** perpendicular says the first segment leaves the box straight out of the

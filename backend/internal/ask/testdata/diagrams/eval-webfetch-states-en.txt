@@ -1,0 +1,27 @@
+A webfetch call moves from a built request through a guarded download, a status-and-size gate, a format branch (PDF, HTML or raw), then character paging and the wrapper — and every move to the next state is a single check, whose failure either ends the call with an error or, in one case, still returns text [1][2][3].
+
+### What moves it to the next state
+
+From the response, four gates run in order: the HTTP status, the declared body size against the cap, the body read, and then the format branch [2]. A PDF is recognised from its first bytes and never from the content-type header, and only when a PDF handler is configured and raw mode is off [2][11].
+
+```mermaid
+stateDiagram-v2
+    [*] --> RequestBuilt : "URL provided"
+    RequestBuilt --> Failed : "URL empty or malformed"
+    RequestBuilt --> ResponseReceived : "Guarded dial, redirect hops"
+    ResponseReceived --> SizeGate : "Status below 400, cap chosen"
+    ResponseReceived --> Failed : "Status 400 or higher"
+    SizeGate --> BodyRead : "Body within the cap"
+    SizeGate --> Failed : "Body over the cap"
+    BodyRead --> PdfText : "PDF magic bytes, handler set"
+    BodyRead --> Decoded : "Not a PDF"
+    PdfText --> Paged : "Handler returns text"
+    PdfText --> Failed : "Handler errors or empty"
+    Decoded --> Markdown : "HTML, raw mode off"
+    Decoded --> Paged : "Raw mode or non-HTML"
+    Markdown --> Paged : "Article text or sentinel"
+    Paged --> [*] : "Paged and wrapped"
+    Failed --> [*] : "Error returned"
+```
+
+One behaviour worth flagging: when HTML simplification fails, the call does **not** error — it returns the upstream sentinel message as the content [2][14].

@@ -17,8 +17,14 @@ import { ramp, textWidth, wrap, type Face } from "./diagramTheme";
 
 export type Point = { x: number; y: number };
 /** step: a box on the path. pill: where the flow starts or stops, the bold
- * box. decision: a flat diamond. outcome: a branch's end, off the path. */
-export type NodeKind = "step" | "pill" | "decision" | "outcome";
+ * box. decision: a flat diamond. outcome: a branch's end, off the path.
+ * start and stop: a state diagram's `[*]`, a dot and a ringed dot. */
+export type NodeKind =
+  "step" | "pill" | "decision" | "outcome" | "start" | "stop";
+
+/** dotted says a node is drawn as a circle, which an edge meets at its
+ * outline, not at a side of its box. */
+export const dotted = (k: NodeKind) => k === "start" || k === "stop";
 export type NodeBox = {
   id: string;
   kind: NodeKind;
@@ -152,6 +158,21 @@ function lay(n: FlowNodeIR, kind: NodeKind, w: number): NodeBox {
   };
 }
 
+/** shaped is a node's box at the width its layout gives boxes: a dot for a
+ * start or a stop, a small diamond for a decision with no text (a state
+ * diagram's choice), a diamond, or a box of the given kind. */
+function shaped(n: FlowNodeIR, kind: NodeKind, w: number): NodeBox {
+  if (n.shape === "start" || n.shape === "stop") {
+    const d = n.shape === "start" ? 16 : 20;
+    return { ...lay(n, n.shape, d), lines: [], w: d, h: d };
+  }
+  if (n.shape === "decision")
+    return n.label === ""
+      ? { ...lay(n, "decision", 28), lines: [], w: 28, h: 28 }
+      : diamond(n, w);
+  return lay(n, kind, w);
+}
+
 /** diamond sizes a decision: as wide as the path's boxes less a step each
  * side, its label wrapped to fit, taller rather than wider. A label tw by th
  * fits inside a diamond w by h when tw/w + th/h <= 1, so each height has a
@@ -200,7 +221,11 @@ function diamond(n: FlowNodeIR, pathW: number): NodeBox {
   return box(wrap(n.label, wMax / 2, s.size, s.face), wMax, hMax);
 }
 
-function labelBox(text: string): { lines: string[]; w: number; h: number } {
+export function labelBox(text: string): {
+  lines: string[];
+  w: number;
+  h: number;
+} {
   const lines = wrap(text, labelMax, ramp.label, "mono");
   const tw = Math.max(...lines.map((l) => textWidth(l, ramp.label, "mono")));
   return { lines, w: Math.ceil(tw), h: lines.length * labelLine };
@@ -302,7 +327,8 @@ export function layoutSpine(ir: FlowIR): FlowLayout | null {
   }
   const byId = new Map(ir.nodes.map((n) => [n.id, n]));
   for (const [id, k] of leftUse) {
-    if (k > (byId.get(id)!.shape === "decision" ? 1 : 2)) return null;
+    const one = ["decision", "start", "stop"].includes(byId.get(id)!.shape);
+    if (k > (one ? 1 : 2)) return null;
   }
 
   // Sizes: the path's boxes share a width, the outcomes theirs.
@@ -318,13 +344,8 @@ export function layoutSpine(ir: FlowIR): FlowLayout | null {
   const sideW = boxWidth(sideNodes, 200, 280);
   const boxes = new Map<string, NodeBox>();
   for (const n of pathNodes)
-    boxes.set(
-      n.id,
-      n.shape === "decision"
-        ? diamond(n, pathW)
-        : lay(n, n.shape === "pill" ? "pill" : "step", pathW),
-    );
-  for (const n of sideNodes) boxes.set(n.id, lay(n, "outcome", sideW));
+    boxes.set(n.id, shaped(n, n.shape === "pill" ? "pill" : "step", pathW));
+  for (const n of sideNodes) boxes.set(n.id, shaped(n, "outcome", sideW));
 
   // Down the path. A row is as tall as its tallest box; a branch is centred
   // on its node. The gap below a box holds the label of the arrow out of it,
@@ -453,7 +474,12 @@ export function layoutSpine(ir: FlowIR): FlowLayout | null {
       const k = used.get(n.id) ?? 0;
       used.set(n.id, k + 1);
       const mid = rowY.get(n.id)!;
-      if (n.kind === "decision" || (leftUse.get(n.id) ?? 0) < 2) return mid;
+      if (
+        n.kind === "decision" ||
+        dotted(n.kind) ||
+        (leftUse.get(n.id) ?? 0) < 2
+      )
+        return mid;
       return mid + (k === 0 ? -8 : 8);
     };
     const leftOf = (n: NodeBox) => n.x;
@@ -498,7 +524,7 @@ export function layoutSpine(ir: FlowIR): FlowLayout | null {
 
 /** frame moves a drawing so its leftmost and topmost marks sit margin in,
  * and sizes the canvas around it. */
-function frame(
+export function frame(
   nodes: NodeBox[],
   edges: EdgeRoute[],
   zones: ZoneBox[],
@@ -843,12 +869,7 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
   );
   const boxes = new Map<string, NodeBox>();
   for (const n of ir.nodes)
-    boxes.set(
-      n.id,
-      n.shape === "decision"
-        ? diamond(n, w)
-        : lay(n, n.shape === "pill" ? "pill" : "step", w),
-    );
+    boxes.set(n.id, shaped(n, n.shape === "pill" ? "pill" : "step", w));
 
   const sides = {
     in: (tb ? "NORTH" : "WEST") as Side,
@@ -958,6 +979,14 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
       "elk.spacing.edgeLabel": "10",
       "elk.edgeLabels.placement": "CENTER",
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+      // A cycle is broken at the edge that runs against the order written,
+      // as the spine reads a loop: left to the engine, a state machine's
+      // retry was kept and its forward path reversed, the start dot landing
+      // in the middle of the picture. Greedy, so only a real cycle is
+      // broken: plain MODEL_ORDER reversed every edge written against the
+      // order, and a failure state mentioned early was hung at the top with
+      // every later transition into it climbing up as a loop back.
+      "elk.layered.cycleBreaking.strategy": "GREEDY_MODEL_ORDER",
       "elk.layered.crossingMinimization.forceNodeModelOrder": "true",
       "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
       "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
@@ -1005,14 +1034,14 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
     const from = boxes.get(ie.from)!;
     const to = boxes.get(ie.to)!;
     if (points.length >= 2) {
+      const last = points.length - 1;
       if (from.kind === "decision")
         points[0] = onDiamond(from, points[0], points[1]);
       if (to.kind === "decision")
-        points[points.length - 1] = onDiamond(
-          to,
-          points[points.length - 1],
-          points[points.length - 2],
-        );
+        points[last] = onDiamond(to, points[last], points[last - 1]);
+      if (dotted(from.kind)) points[0] = onCircle(from, points[0], points[1]);
+      if (dotted(to.kind))
+        points[last] = onCircle(to, points[last], points[last - 1]);
     }
     // An edge into a box wholly before its own, against the flow, is a loop
     // back, dashed as the spine draws it.
@@ -1092,6 +1121,25 @@ export function tidy(points: Point[]): Point[] {
     out.push(p);
   }
   return out;
+}
+
+/** onCircle moves an edge's end from a dot's bounding box onto its
+ * outline, along the segment that reaches it. An end beside the circle,
+ * which the segment never meets, stays where it is. */
+export function onCircle(n: NodeBox, end: Point, next: Point): Point {
+  const cx = n.x + n.w / 2;
+  const cy = n.y + n.h / 2;
+  const r = n.w / 2;
+  if (end.x === next.x) {
+    const dx = end.x - cx;
+    if (Math.abs(dx) >= r) return end;
+    const dy = Math.sqrt(r * r - dx * dx);
+    return { x: end.x, y: Math.round(cy + Math.sign(next.y - cy) * dy) };
+  }
+  const dy = end.y - cy;
+  if (Math.abs(dy) >= r) return end;
+  const dx = Math.sqrt(r * r - dy * dy);
+  return { x: Math.round(cx + Math.sign(next.x - cx) * dx), y: end.y };
 }
 
 /** onDiamond moves an edge's end from the diamond's bounding box onto its

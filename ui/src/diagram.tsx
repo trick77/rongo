@@ -302,6 +302,9 @@ export const ownKinds: ReadonlySet<string> = new Set([
   "flowchart",
   "graph",
   "sequenceDiagram",
+  "stateDiagram",
+  "stateDiagram-v2",
+  "erDiagram",
 ]);
 
 /** ours is rongo's drawing of a parsed source, or null where it has none.
