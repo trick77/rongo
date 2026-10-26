@@ -425,18 +425,21 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 
 		// Calls over the limit follow the round's own calls in the trace,
 		// which is the order a reader reads them in.
+		// The model's own turn goes back whole, its signed thinking with it
+		// on the Messages protocol, and the calls over the limit are answered
+		// with a refusal: trimming the turn instead would drop the signed
+		// blocks, which name every call.
+		msgs = append(msgs, turn.Assistant())
 		var overLimit []LocateStep
 		if len(turn.Calls) > locateMaxCalls {
 			for _, over := range turn.Calls[locateMaxCalls:] {
 				report.Refused = append(report.Refused, over.Name+"(over the call limit)")
 				overLimit = append(overLimit, callStepOnly(over).refusedAs("", "over the limit of calls in one round"))
+				msgs = append(msgs, llm.ToolResult(over.ID,
+					fmt.Sprintf("Refused: over the limit of %d calls in one round. Ask again next round.", locateMaxCalls)))
 			}
 			turn.Calls = turn.Calls[:locateMaxCalls]
 		}
-		// The model's own turn, its signed thinking with it where the
-		// protocol has some (claude-opus-5-5); rebuilt when the limit above
-		// trimmed its calls.
-		msgs = append(msgs, turn.Assistant())
 		stop := false
 		// Which call of this turn the reserve ran out on: the calls after it
 		// are refused, and the count has to index the same list they do.

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/trick77/llmwire"
 	"github.com/trick77/llmwire/llmwiretest"
 
 	"github.com/trick77/rongo/internal/llm/llmtest"
@@ -44,22 +45,47 @@ func TestCallTools_replaysTheModelsOwnTurn(t *testing.T) {
 	}
 }
 
-func TestToolTurn_assistantIsRebuiltOnceTheCallsAreTrimmed(t *testing.T) {
+func TestToolTurn_assistantIsRebuiltOnceTheCallsChange(t *testing.T) {
 	// Given: a turn with two calls, and the replay items that carry both.
 	calls := []ToolCall{{ID: "a", Name: "grep", Arguments: "{}"}, {ID: "b", Name: "grep", Arguments: "{}"}}
-	turn := ToolTurn{Calls: calls, replay: []json.RawMessage{json.RawMessage(`{"type":"thinking"}`)}, replayCalls: 2}
+	turn := ToolTurn{Calls: calls, own: llmwire.Message{Role: llmwire.RoleAssistant,
+		ToolCalls:     []llmwire.ToolCall{{ID: "a"}, {ID: "b"}},
+		ResponseItems: []json.RawMessage{json.RawMessage(`{"type":"thinking"}`)}}}
 
-	// When: the caller keeps only the first call, as locate does over its limit.
-	turn.Calls = turn.Calls[:1]
-
-	// Then: the signed blocks cannot go back without the call they name; the
-	// turn goes back rebuilt from what the caller kept.
-	if got := turn.Assistant(); got.replay != nil || len(got.Calls) != 1 {
-		t.Errorf("trimmed turn = %+v, want rebuilt with one call", got)
-	}
-	turn.Calls = calls
+	// Then: the turn as the model sent it carries its replay items.
 	if got := turn.Assistant(); got.replay == nil {
-		t.Error("an untrimmed turn lost its replay items")
+		t.Error("an unchanged turn lost its replay items")
+	}
+	// The signed blocks name every call they carry: a turn whose calls the
+	// caller trimmed, reordered or replaced goes back rebuilt.
+	for name, changed := range map[string][]ToolCall{
+		"trimmed":   calls[:1],
+		"reordered": {calls[1], calls[0]},
+		"replaced":  {calls[0], {ID: "c", Name: "grep", Arguments: "{}"}},
+	} {
+		turn.Calls = changed
+		if got := turn.Assistant(); got.replay != nil || len(got.Calls) != len(changed) {
+			t.Errorf("%s: turn = %+v, want rebuilt from the calls kept", name, got)
+		}
+	}
+}
+
+func TestWireMessages_aCallingTurnCarriesItsReplayAndItsResults(t *testing.T) {
+	// The locate loop's own shape: the model's calling turn, replayed, then
+	// its results. llmwire gets the calls beside the items they must agree
+	// with, and the results addressed to them.
+	items := []json.RawMessage{json.RawMessage(`{"type":"thinking","thinking":"x","signature":"s"}`),
+		json.RawMessage(`{"type":"tool_use","id":"a","name":"grep","input":{}}`)}
+	turn := ToolTurn{Calls: []ToolCall{{ID: "a", Name: "grep", Arguments: "{}"}},
+		own: llmwire.Message{Role: llmwire.RoleAssistant, ToolCalls: []llmwire.ToolCall{{ID: "a"}}, ResponseItems: items}}
+
+	got := wireMessages([]ToolMessage{{Role: "user", Content: "q"}, turn.Assistant(), ToolResult("a", "hit")})
+
+	if len(got) != 3 || len(got[1].ResponseItems) != 2 || len(got[1].ToolCalls) != 1 || got[1].ToolCalls[0].ID != "a" {
+		t.Fatalf("assistant turn = %+v, want the replay items beside the call", got[1])
+	}
+	if got[2].ToolCallID != "a" {
+		t.Errorf("result answers %q, want a", got[2].ToolCallID)
 	}
 }
 

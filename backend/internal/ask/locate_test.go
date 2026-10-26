@@ -771,10 +771,14 @@ func TestLocate_runsAtMostTheCallLimitPerTurn(t *testing.T) {
 	if len(report.Refused) != 4 {
 		t.Errorf("Refused = %v, want the 4 calls over the limit", report.Refused)
 	}
-	// Every call the next request advertises has its result: only the calls
-	// that ran are advertised.
-	if len(told) != locateMaxCalls {
-		t.Errorf("tool results = %d, want one per call that ran", len(told))
+	// Every call the next request advertises has its result. The turn goes
+	// back whole (a signed one on the Messages protocol cannot be trimmed),
+	// so the calls over the limit are answered with a refusal.
+	if len(told) != len(calls) {
+		t.Fatalf("tool results = %d, want one per call the model asked for (%d)", len(told), len(calls))
+	}
+	if refusals := strings.Count(strings.Join(told, "\n"), "over the limit"); refusals != 4 {
+		t.Errorf("refusals told = %d, want the 4 calls over the limit", refusals)
 	}
 }
 

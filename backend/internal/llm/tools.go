@@ -49,13 +49,11 @@ type ToolTurn struct {
 	Content string
 	Calls   []ToolCall
 
-	// replay is the turn as the protocol replays it (llmwire's
-	// ResponseItems): on claude-opus-5-5 its signed thinking blocks, which a
-	// turn rebuilt from Content and Calls loses, so each round re-thinks
-	// without the earlier reasoning. replayCalls is how many calls it names,
-	// to tell a turn the caller trimmed.
-	replay      []json.RawMessage
-	replayCalls int
+	// own is the turn as llmwire replays it (resp.Assistant()): on the
+	// Messages protocol its signed thinking blocks, which a turn rebuilt from
+	// Content and Calls loses, so each round re-thinks without the earlier
+	// reasoning.
+	own llmwire.Message
 }
 
 // Done reports whether the model stopped asking for tools. A caller loops
@@ -63,15 +61,28 @@ type ToolTurn struct {
 func (t ToolTurn) Done() bool { return len(t.Calls) == 0 }
 
 // Assistant is this turn fed back as the model's own, its replay items with
-// it. A caller that trimmed Calls gets the turn rebuilt from what it kept:
-// the signed blocks name every call, and a call sent without its result is
-// refused.
+// it. A caller that changed Calls (trimmed, reordered, replaced) gets the
+// turn rebuilt from what it kept: the signed blocks name every call they
+// carry, and llmwire refuses items that disagree with the calls sent.
 func (t ToolTurn) Assistant() ToolMessage {
 	m := AssistantCalls(t.Content, t.Calls)
-	if len(t.Calls) == t.replayCalls {
-		m.replay = t.replay
+	if sameCalls(t.Calls, t.own.ToolCalls) {
+		m.replay = t.own.ResponseItems
 	}
 	return m
+}
+
+// sameCalls says the caller's calls are the reply's, by id and in order.
+func sameCalls(calls []ToolCall, own []llmwire.ToolCall) bool {
+	if len(calls) != len(own) {
+		return false
+	}
+	for i := range calls {
+		if calls[i].ID != own[i].ID {
+			return false
+		}
+	}
+	return true
 }
 
 // ToolMessage is one message of a tool conversation. It is a superset of
@@ -142,7 +153,7 @@ func (c *Client) CallTools(ctx context.Context, msgs []ToolMessage, tools []Tool
 	u := usageFrom(resp.Usage)
 	record(ctx, o, c.Deployment(o.lane), u, time.Since(started))
 
-	turn := ToolTurn{Content: resp.Content, replay: resp.ResponseItems, replayCalls: len(resp.ToolCalls)}
+	turn := ToolTurn{Content: resp.Content, own: resp.Assistant()}
 	for _, call := range resp.ToolCalls {
 		turn.Calls = append(turn.Calls, ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments})
 	}
