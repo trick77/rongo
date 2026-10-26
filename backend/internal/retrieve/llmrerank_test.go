@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -122,19 +124,35 @@ func TestLLMRerank_readsNumbersWrappedInLists(t *testing.T) {
 	}
 }
 
-// TestLLMRerank_keepsTheFusedOrderWhenAListHoldsMoreThanANumber: [3,1] inside
-// the list could be a pair or a range; guessing which is the reranker doing
-// worse than nothing.
-func TestLLMRerank_keepsTheFusedOrderWhenAListHoldsMoreThanANumber(t *testing.T) {
-	hits := []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}}
-	for _, reply := range []string{`{"relevant":[[3,1]]}`, `{"relevant":[[]]}`, `{"relevant":[["3"]]}`} {
+// TestLLMRerank_skipsAListHoldingMoreThanANumber: [3,1] inside the list could
+// be a pair or a range; guessing which is the reranker doing worse than
+// nothing. Only that entry is left out — the picks beside it, a null among
+// them, still count.
+func TestLLMRerank_skipsAListHoldingMoreThanANumber(t *testing.T) {
+	hits := []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}, {ChunkID: 4}}
+	for reply, want := range map[string][]int64{
+		`{"relevant":[[3,1]]}`:              {1, 2, 3, 4},
+		`{"relevant":[[]]}`:                 {1, 2, 3, 4},
+		`{"relevant":[["3"],[null]]}`:       {1, 2, 3, 4},
+		`{"relevant":[[4],[2,3],null,[3]]}`: {4, 3, 1, 2},
+		`{"relevant":[[2],4]}`:              {2, 4, 1, 3},
+	} {
+		var logs strings.Builder
 		r := NewLLMReranker(rerankLLM(t, reply, nil), 60)
-		got, err := r.Rerank(context.Background(), "q", hits, 3)
+		r.Log = slog.New(slog.NewTextHandler(&logs, nil))
+		got, err := r.Rerank(context.Background(), "q", hits, 4)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != 3 || got[0].ChunkID != 1 || got[1].ChunkID != 2 {
-			t.Errorf("%s changed the order: %+v", reply, got)
+		ids := make([]int64, len(got))
+		for i, h := range got {
+			ids[i] = h.ChunkID
+		}
+		if !slices.Equal(ids, want) {
+			t.Errorf("%s: order = %v, want %v", reply, ids, want)
+		}
+		if logs.Len() > 0 {
+			t.Errorf("%s: a readable reply logged %q", reply, logs.String())
 		}
 	}
 }

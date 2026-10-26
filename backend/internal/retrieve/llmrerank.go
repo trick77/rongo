@@ -173,21 +173,21 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 
 // pick is one number of the reply, written bare or as a list holding only it:
 // a gate model answered {"relevant":[[1],[2],[5]]} in every eval run, and as
-// []int each of those kept the fused order. Anything else in the list is not
-// read as a number — a pair could be a range, and a guess is worse than the
-// fused order.
+// []int each of those kept the fused order. Any other list is pick 0, which
+// the loop skips like any number out of range: a pair could be a range, and a
+// guess is worse than leaving it out. Skipped, not an error, so the picks
+// beside it still count.
 type pick int
 
 func (p *pick) UnmarshalJSON(b []byte) error {
-	var one []int
-	if json.Unmarshal(b, &one) == nil {
-		if len(one) != 1 {
-			return fmt.Errorf("rerank pick %s is not one number", b)
-		}
-		*p = pick(one[0])
-		return nil
+	if len(b) == 0 || b[0] != '[' {
+		return json.Unmarshal(b, (*int)(p))
 	}
-	return json.Unmarshal(b, (*int)(p))
+	var one []int
+	if json.Unmarshal(b, &one) == nil && len(one) == 1 {
+		*p = pick(one[0])
+	}
+	return nil
 }
 
 func cut(hits []Hit, k int) []Hit {
