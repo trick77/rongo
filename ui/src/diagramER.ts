@@ -7,6 +7,7 @@ import {
   elkEdge,
   elkLabel,
   elkPoints,
+  px,
   type EdgeRoute,
   type Elk,
   type FlowLayout,
@@ -193,8 +194,8 @@ export async function layoutER(ir: ERIR, elk: Elk): Promise<ERLayout> {
   });
   for (const c of root.children ?? []) {
     const b = boxes.get(c.id)!;
-    b.x = Math.round(c.x ?? 0);
-    b.y = Math.round(c.y ?? 0);
+    b.x = px(c.x ?? 0);
+    b.y = px(c.y ?? 0);
   }
   const routes: EdgeRoute[] = (root.edges ?? []).map((e, i) => {
     const r = ir.rels[i];

@@ -15,7 +15,8 @@ import { ramp, textWidth } from "./diagramTheme";
  * every hand-drawn diagram to (references/primitives-core.md), checked on a
  * computed layout. Every arrow straight or bent at right angles, leaving and
  * entering a box square to its edge; never behind a box it does not
- * connect; no two arrows on one stretch of line or one attach point; every
+ * connect; no two arrows on one stretch of line or one attach point, or
+ * crossing; every
  * label clear of its line and of every box; every label inside its box.
  * corpus.test.ts runs it over every corpus diagram, so a layout change that
  * breaks one fails a test rather than a picture.
@@ -105,6 +106,16 @@ export function check(l: FlowLayout): string[] {
       const fends = [f.points[0], f.points[f.points.length - 1]];
       if (ends.some((p) => fends.some((q) => p.x === q.x && p.y === q.y)))
         out.push(`${name} and ${other}: share an attach point`);
+      // No two connectors cross: a person drawing it would have swapped
+      // the branches instead. A layout keeping the order written has no
+      // branch to swap.
+      if (
+        !l.written &&
+        segments(e.points).some(([a, b]) =>
+          segments(f.points).some(([c, d]) => cut(a, b, c, d)),
+        )
+      )
+        out.push(`${name} and ${other}: cross`);
       if (e.label && f.label && overlaps(e.label, f.label))
         out.push(`${name} and ${other}: labels overlap`);
     }
@@ -316,6 +327,25 @@ function distance(r: Rect, a: Point, b: Point): number {
   const dx = Math.max(r.x - x1, x0 - (r.x + r.w), 0);
   const dy = Math.max(r.y - y1, y0 - (r.y + r.h), 0);
   return Math.hypot(dx, dy);
+}
+
+/** cut says a horizontal and a vertical segment cross inside both: one
+ * meeting the other at an end is not a crossing. */
+function cut(a: Point, b: Point, c: Point, d: Point): boolean {
+  const h1 = a.y === b.y;
+  if (h1 === (c.y === d.y)) return false;
+  const [h, v] = h1
+    ? [
+        [a, b],
+        [c, d],
+      ]
+    : [
+        [c, d],
+        [a, b],
+      ];
+  const within = (p: number, q: number, r: number) =>
+    p > Math.min(q, r) && p < Math.max(q, r);
+  return within(v[0].x, h[0].x, h[1].x) && within(h[0].y, v[0].y, v[1].y);
 }
 
 /** collinear says two axis-aligned segments share a stretch of one line. */

@@ -157,6 +157,7 @@ describe("check", () => {
     );
     expect(out).toContain("a->b and a->b: run on top of each other");
     expect(out).toContain("a->b and a->b: share an attach point");
+    expect(out).not.toContain("a->b and a->b: cross");
     expect(
       check(
         layout(
@@ -165,5 +166,39 @@ describe("check", () => {
         ),
       )[0],
     ).toMatch(/overflows its box/);
+  });
+
+  it("refuses two arrows crossing, and passes them side by side", () => {
+    const c = node("c", 200, 0);
+    const d = node("d", 200, 200);
+    const e = node("e", 0, 200);
+    const ad = edge("a", "d", [
+      [50, 40],
+      [50, 120],
+      [250, 120],
+      [250, 200],
+    ]);
+    const ce = edge("c", "e", [
+      [230, 40],
+      [230, 160],
+      [70, 160],
+      [70, 200],
+    ]);
+    expect(check(layout([a, c, d, e], [ad, ce]))).toEqual([
+      "a->d and c->e: cross",
+    ]);
+    // A mapping keeps both columns as written: its crossings are its own.
+    expect(check({ ...layout([a, c, d, e], [ad, ce]), written: true })).toEqual(
+      [],
+    );
+    const ae = edge("a", "e", [
+      [30, 40],
+      [30, 200],
+    ]);
+    const cd = edge("c", "d", [
+      [270, 40],
+      [270, 200],
+    ]);
+    expect(check(layout([a, c, d, e], [ae, cd, ad]))).toEqual([]);
   });
 });

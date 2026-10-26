@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import ELK from "elkjs/lib/elk.bundled.js";
 import type { FlowEdgeIR, FlowIR, FlowNodeIR } from "./diagramIR";
 import {
+  elkPoints,
   isMapping,
   layoutElk,
   layoutFlow,
@@ -10,6 +11,7 @@ import {
   looksLikeCode,
   onCircle,
   onDiamond,
+  px,
   tidy,
   type FlowLayout,
 } from "./diagramLayout";
@@ -532,5 +534,30 @@ describe("onCircle", () => {
       x: 20,
       y: 0,
     });
+  });
+});
+
+describe("elkPoints", () => {
+  it("rounds one straight line onto one pixel row", () => {
+    // As the engine returned a state diagram's poll() edge: the bend and
+    // the end of one line, either side of a half pixel.
+    const pts = elkPoints({
+      id: "e",
+      sources: ["a"],
+      targets: ["b"],
+      sections: [
+        {
+          id: "s",
+          startPoint: { x: 216, y: 60.666666666666664 },
+          bendPoints: [
+            { x: 240, y: 60.666666666666664 },
+            { x: 240, y: 39.5 },
+          ],
+          endPoint: { x: 346, y: 39.49999999999999 },
+        },
+      ],
+    });
+    expect(pts.at(-1)!.y).toBe(pts.at(-2)!.y);
+    expect(px(39.49999999999999)).toBe(px(39.5));
   });
 });
