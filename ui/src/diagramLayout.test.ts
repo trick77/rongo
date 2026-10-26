@@ -227,7 +227,7 @@ describe("labels that do not fit the usual box", () => {
     };
     const l = layoutMapping(ir);
     expect(l.edges.some((r) => (r.label?.lines.length ?? 0) > 1)).toBe(true);
-    expect(check(l)).toEqual([]);
+    expect(check(l, { written: true })).toEqual([]);
   });
 });
 
@@ -239,7 +239,7 @@ describe("zones and loops", () => {
       ...mapping,
       zones: [{ id: "E", title: long }, mapping.zones[1]],
     };
-    expect(check(layoutMapping(ir))).toEqual([]);
+    expect(check(layoutMapping(ir), { written: true })).toEqual([]);
   });
 
   it("widens an ELK zone for its title", async () => {
@@ -279,7 +279,7 @@ describe("layoutMapping", () => {
       .filter((r) => r.points.length > 2)
       .map((r) => `${r.from}->${r.to}`);
     expect(bent).toEqual(["e2->t1"]);
-    expect(check(l)).toEqual([]);
+    expect(check(l, { written: true })).toEqual([]);
   });
 
   it("frames each side in a zone titled as written", () => {
@@ -353,6 +353,65 @@ describe("layoutElk", () => {
       expect(r.label!.x + r.label!.w).toBeLessThanOrEqual(z.x + z.w);
     }
   });
+
+  // Sides fixed by the order written crossed these branches; left to the
+  // engine in the drawing, they left partway down the slopes.
+  it("sends each branch out of the corner facing its target", async () => {
+    const ir = flow(
+      [n("s"), n("d", "which?", "decision"), n("a"), n("b"), n("c")],
+      [
+        e("s", "d"),
+        e("d", "a", "one"),
+        e("d", "b", "two"),
+        e("d", "c", "three"),
+      ],
+    );
+    const l = await layoutElk(ir, new ELK());
+    expect(check(l)).toEqual([]);
+    const d = box(l, "d");
+    const corners = ["a", "b", "c"]
+      .map((t) => ({ t, x: box(l, t).x, at: route(l, "d", t).points[0] }))
+      .sort((p, q) => p.x - q.x)
+      .map(({ at }) => at);
+    expect(corners).toEqual([
+      { x: d.x, y: d.y + d.h / 2 },
+      { x: d.x + d.w / 2, y: d.y + d.h },
+      { x: d.x + d.w, y: d.y + d.h / 2 },
+    ]);
+  });
+
+  it("enters a diamond from above, a loop back into it too", async () => {
+    const ir = flow(
+      [n("s"), n("d", "ok?", "decision"), n("a"), n("x")],
+      [
+        e("s", "d"),
+        e("d", "a", "yes"),
+        e("d", "x", "no"),
+        e("x", "d", "retry"),
+      ],
+    );
+    const l = await layoutElk(ir, new ELK());
+    expect(check(l)).toEqual([]);
+    const d = box(l, "d");
+    for (const from of ["s", "x"]) {
+      const p = route(l, from, "d").points;
+      expect(p[p.length - 1].y).toBeLessThan(d.y + d.h / 2);
+    }
+  });
+
+  it("draws four branches out of one diamond without a crossing", async () => {
+    const ir = flow(
+      [n("s"), n("d", "kind?", "decision"), n("a"), n("b"), n("c"), n("f")],
+      [
+        e("s", "d"),
+        e("d", "a", "one"),
+        e("d", "b", "two"),
+        e("d", "c", "three"),
+        e("d", "f", "four"),
+      ],
+    );
+    expect(check(await layoutElk(ir, new ELK()))).toEqual([]);
+  });
 });
 
 describe("looksLikeCode", () => {
@@ -419,9 +478,10 @@ describe("tidy and onDiamond", () => {
       x: 50,
       y: 0,
     });
+    // 37.5 on the outline, on a whole pixel as every other end.
     expect(onDiamond(d, { x: 75, y: 50 }, { x: 75, y: 80 })).toEqual({
       x: 75,
-      y: 37.5,
+      y: 38,
     });
     expect(onDiamond(d, { x: 100, y: 25 }, { x: 130, y: 25 })).toEqual({
       x: 100,

@@ -6,7 +6,7 @@ import { dropStrayMarks, escapeAngles } from "./diagramText";
 import { fenceRe } from "./markdown";
 import { fits, toIR, type DiagramIR } from "./diagramIR";
 import { mermaidize } from "./diagramExport";
-import { layoutFlow } from "./diagramLayout";
+import { isMapping, layoutFlow } from "./diagramLayout";
 import { layoutSequence } from "./diagramSequence";
 import { check, checkER, checkSequence } from "./diagramCheck";
 import { layoutER } from "./diagramER";
@@ -172,7 +172,9 @@ describe("rongo's drawing of the corpus", () => {
         expect(checkER(await layoutER(ir, new ELK()))).toEqual([]);
         return;
       }
-      expect(check(await layoutFlow(ir, new ELK()))).toEqual([]);
+      expect(
+        check(await layoutFlow(ir, new ELK()), { written: isMapping(ir) }),
+      ).toEqual([]);
     });
 
     it(`frames every node ${name} marks :::focus, and no other`, async () => {

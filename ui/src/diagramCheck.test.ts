@@ -188,7 +188,7 @@ describe("check", () => {
       "a->d and c->e: cross",
     ]);
     // A mapping keeps both columns as written: its crossings are its own.
-    expect(check({ ...layout([a, c, d, e], [ad, ce]), written: true })).toEqual(
+    expect(check(layout([a, c, d, e], [ad, ce]), { written: true })).toEqual(
       [],
     );
     const ae = edge("a", "e", [

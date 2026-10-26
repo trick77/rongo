@@ -15,9 +15,9 @@ import { ramp, textWidth } from "./diagramTheme";
  * every hand-drawn diagram to (references/primitives-core.md), checked on a
  * computed layout. Every arrow straight or bent at right angles, leaving and
  * entering a box square to its edge; never behind a box it does not
- * connect; no two arrows on one stretch of line or one attach point, or
- * crossing; every
- * label clear of its line and of every box; every label inside its box.
+ * connect; no two arrows on one stretch of line or one attach point, and
+ * none crossing another; every label clear of its line and of every box;
+ * every label inside its box.
  * corpus.test.ts runs it over every corpus diagram, so a layout change that
  * breaks one fails a test rather than a picture.
  *
@@ -29,7 +29,13 @@ type Rect = { x: number; y: number; w: number; h: number };
 /** The least clear space between a label and its own line. */
 export const minLabelGap = 6;
 
-export function check(l: FlowLayout): string[] {
+/** A mapping keeps both its columns in the order written, so an arrow
+ * crossing another is the mapping's own: its caller says so with
+ * `written`, and the crossing rule is not held against it. */
+export function check(
+  l: FlowLayout,
+  opts: { written?: boolean } = {},
+): string[] {
   const out: string[] = [];
   const byId = new Map(l.nodes.map((n) => [n.id, n]));
 
@@ -107,10 +113,9 @@ export function check(l: FlowLayout): string[] {
       if (ends.some((p) => fends.some((q) => p.x === q.x && p.y === q.y)))
         out.push(`${name} and ${other}: share an attach point`);
       // No two connectors cross: a person drawing it would have swapped
-      // the branches instead. A layout keeping the order written has no
-      // branch to swap.
+      // the branches instead.
       if (
-        !l.written &&
+        !opts.written &&
         segments(e.points).some(([a, b]) =>
           segments(f.points).some(([c, d]) => cut(a, b, c, d)),
         )
