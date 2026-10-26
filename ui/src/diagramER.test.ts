@@ -8,12 +8,12 @@ import type { Palette } from "./diagramTheme";
 import { layoutSpine } from "./diagramLayout";
 
 const pal: Palette = {
-  surface: "#192026",
-  fg: "#e2e8ec",
-  muted: "#98a5af",
-  line: "#35414b",
-  tint: "#1f2830",
-  accent: "#62b4d0",
+  surface: "#151514",
+  fg: "#ece8df",
+  muted: "#a29e94",
+  line: "#3b3935",
+  tint: "#201f1c",
+  accent: "#d97757",
   warn: "#e3a33f",
   sans: "Plex Sans",
   mono: "Plex Mono",

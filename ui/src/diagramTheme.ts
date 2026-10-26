@@ -1,7 +1,7 @@
 /**
- * The look of rongo's diagrams, which is not the chrome's: the dark palette,
- * the IBM Plex pair and the type sizes of an engineering-memo reference
- * design (index.css, the --diagram-* tokens). Plus the
+ * The look of rongo's diagrams, which is not the chrome's: a dark warm
+ * palette, the IBM Plex pair and the type sizes of an engineering-memo
+ * reference design (index.css, the --diagram-* tokens). Plus the
  * text measure the layout sizes boxes by.
  *
  * Roles, not values: the drawing asks for `fg` or `line`, and index.css says
