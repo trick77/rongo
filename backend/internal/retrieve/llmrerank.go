@@ -2,6 +2,7 @@ package retrieve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -146,7 +147,7 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 		return cut(hits, k), nil
 	}
 	var reply struct {
-		Relevant []int `json:"relevant"`
+		Relevant []pick `json:"relevant"`
 	}
 	if err := llm.DecodeReply(out, &reply); err != nil {
 		r.logger().Warn("rerank reply was not JSON; fused order kept", "reply", llmwire.Truncate(out, 120))
@@ -154,7 +155,8 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 	}
 	taken := make([]bool, len(hits))
 	ranked := make([]Hit, 0, len(hits))
-	for _, n := range reply.Relevant {
+	for _, p := range reply.Relevant {
+		n := int(p)
 		if n < 1 || n > len(hits) || taken[n-1] {
 			continue
 		}
@@ -167,6 +169,25 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 		}
 	}
 	return cut(ranked, k), nil
+}
+
+// pick is one number of the reply, written bare or as a list holding only it:
+// a gate model answered {"relevant":[[1],[2],[5]]} in every eval run, and as
+// []int each of those kept the fused order. Anything else in the list is not
+// read as a number — a pair could be a range, and a guess is worse than the
+// fused order.
+type pick int
+
+func (p *pick) UnmarshalJSON(b []byte) error {
+	var one []int
+	if json.Unmarshal(b, &one) == nil {
+		if len(one) != 1 {
+			return fmt.Errorf("rerank pick %s is not one number", b)
+		}
+		*p = pick(one[0])
+		return nil
+	}
+	return json.Unmarshal(b, (*int)(p))
 }
 
 func cut(hits []Hit, k int) []Hit {

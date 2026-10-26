@@ -107,6 +107,38 @@ func TestLLMRerank_putsWhatTheModelPickedFirstAndKeepsTheRest(t *testing.T) {
 	}
 }
 
+// TestLLMRerank_readsNumbersWrappedInLists: a gate model answered
+// {"relevant":[[1],[2],[5]]} in every eval run, nine replies over three, and
+// each kept the fused order as unreadable. A one-number list is that number.
+func TestLLMRerank_readsNumbersWrappedInLists(t *testing.T) {
+	hits := []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}}
+	r := NewLLMReranker(rerankLLM(t, `{"relevant":[[3],[1]]}`, nil), 60)
+	got, err := r.Rerank(context.Background(), "q", hits, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].ChunkID != 3 || got[1].ChunkID != 1 || got[2].ChunkID != 2 {
+		t.Errorf("order = %+v, want chunks 3, 1, 2", got)
+	}
+}
+
+// TestLLMRerank_keepsTheFusedOrderWhenAListHoldsMoreThanANumber: [3,1] inside
+// the list could be a pair or a range; guessing which is the reranker doing
+// worse than nothing.
+func TestLLMRerank_keepsTheFusedOrderWhenAListHoldsMoreThanANumber(t *testing.T) {
+	hits := []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}}
+	for _, reply := range []string{`{"relevant":[[3,1]]}`, `{"relevant":[[]]}`, `{"relevant":[["3"]]}`} {
+		r := NewLLMReranker(rerankLLM(t, reply, nil), 60)
+		got, err := r.Rerank(context.Background(), "q", hits, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 3 || got[0].ChunkID != 1 || got[1].ChunkID != 2 {
+			t.Errorf("%s changed the order: %+v", reply, got)
+		}
+	}
+}
+
 func TestLLMRerank_keepsTheFusedOrderWhenTheReplyIsNotJSON(t *testing.T) {
 	hits := []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}}
 	r := NewLLMReranker(rerankLLM(t, "I think result 2 is best.", nil), 60)
