@@ -12,7 +12,6 @@ import {
   onCircle,
   onDiamond,
   px,
-  tangles,
   tidy,
   type FlowLayout,
 } from "./diagramLayout";
@@ -429,10 +428,9 @@ describe("layoutElk", () => {
 
   // A box beside the diamond in its layer, its arrow running past the
   // diamond to a target the diamond shares. The engine tangles this twice
-  // whatever the sides (corners, all straight on, or its own choice); the
-  // order written tangled it three times. The fallback is what is tested:
-  // the corners tangle here, so the drawing comes from comparing both.
-  it("takes the less tangled drawing when the corners tangle", async () => {
+  // whatever the sides (these corners, all straight on, or its own
+  // choice); the order written tangled it three times.
+  it("tangles a box beside its diamond no more than the engine must", async () => {
     const ir = flow(
       [n("s"), n("t"), n("u"), n("d", "which?", "decision")].concat([
         n("a"),
@@ -449,7 +447,10 @@ describe("layoutElk", () => {
         e("d", "c", "three"),
       ],
     );
-    expect(tangles(await layoutElk(ir, new ELK()))).toBeLessThanOrEqual(2);
+    const tangled = check(await layoutElk(ir, new ELK())).filter((m) =>
+      /: cross$|passes behind/.test(m),
+    );
+    expect(tangled.length).toBeLessThanOrEqual(2);
   });
 
   it("draws four branches out of one diamond without a crossing", async () => {

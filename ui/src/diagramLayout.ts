@@ -867,9 +867,9 @@ type Side = "NORTH" | "SOUTH" | "EAST" | "WEST";
  * box onto its outline.
  *
  * Where a target lies is only known once it is placed, so a graph with a
- * diamond is laid out twice: first with the sides left to the engine,
- * which places the targets so their branches do not cross, then with the
- * sides read off that placement. Corners fixed by the order written (first
+ * diamond of two or more branches is laid out twice: first with the sides
+ * left to the engine, which places the targets so their branches do not
+ * cross, then with the sides read off that placement. Corners fixed by the order written (first
  * branch straight on, second right, third left) crossed whenever the
  * engine put the second branch's target left of the first's. Left free in
  * the drawing itself, a loop back entered a diamond from below and the
@@ -1016,8 +1016,8 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
   const [before, on, after]: Side[] = tb
     ? ["WEST", "SOUTH", "EAST"]
     : ["NORTH", "EAST", "SOUTH"];
-  // Every branch straight on, the engine ordering them along that corner:
-  // all a diamond with one branch needs, and the drawing to fall back on.
+  // A diamond with one branch sends it straight on: nothing to choose
+  // between, so no first pass to pay for.
   const straight = new Map<string, Side>();
   for (const list of ports.values())
     for (const p of list) straight.set(p.id, p.out ? on : entry);
@@ -1077,8 +1077,8 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
     const off = (p: P) => across.get(p.far)! - across.get(node)!;
     // The branch whose target lies nearest straight on goes straight on,
     // the first written on a tie; every other one out of the corner on the
-    // side its target lies. A branch back to an earlier step never goes
-    // straight on: it turned back up across its siblings.
+    // side its target lies. Of two or more, a branch back to an earlier
+    // step never goes straight on: it turned back up across its siblings.
     let ahead: P | undefined;
     for (const p of list) {
       if (!p.out || along.get(p.far)! <= along.get(node)!) continue;
@@ -1090,14 +1090,7 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
         !p.out ? entry : p === ahead ? on : off(p) < 0 ? before : after,
       );
   }
-  // The engine places the second pass afresh, so a corner read off the
-  // first can still send a branch across another or behind a box: then the
-  // drawing with every branch straight on is kept, if it tangles less.
-  const drawn = draw(await elk.layout(graph(corners)));
-  const knots = tangles(drawn);
-  if (knots === 0) return drawn;
-  const plain = draw(await elk.layout(graph(straight)));
-  return tangles(plain) < knots ? plain : drawn;
+  return draw(await elk.layout(graph(corners)));
 }
 
 /** elkRouteFor reads a flowchart's edges as the engine laid them out, each
@@ -1148,60 +1141,6 @@ function elkRouteFor(
     if (label) route.label = label;
     return route;
   };
-}
-
-/** tangles counts what a person drawing the chart would have avoided: two
- * arrows crossing, and an arrow behind a box it does not connect. */
-export function tangles(l: FlowLayout): number {
-  const segs = l.edges.map((e) =>
-    e.points.slice(1).map((p, k): [Point, Point] => [e.points[k], p]),
-  );
-  let n = 0;
-  segs.forEach((s, i) => {
-    for (const t of segs.slice(i + 1))
-      n += s.filter(([a, b]) => t.some(([c, d]) => cut(a, b, c, d))).length;
-    const e = l.edges[i];
-    for (const b of l.nodes) {
-      if (b.id === e.from || b.id === e.to) continue;
-      n += s.filter(([p, q]) => through(p, q, b)).length;
-    }
-  });
-  return n;
-}
-
-/** cut says a horizontal and a vertical segment cross inside both: one
- * meeting the other at an end is not a crossing. */
-export function cut(a: Point, b: Point, c: Point, d: Point): boolean {
-  const h1 = a.y === b.y;
-  if (h1 === (c.y === d.y)) return false;
-  const [h, v] = h1
-    ? [
-        [a, b],
-        [c, d],
-      ]
-    : [
-        [c, d],
-        [a, b],
-      ];
-  const within = (p: number, q: number, r: number) =>
-    p > Math.min(q, r) && p < Math.max(q, r);
-  return within(v[0].x, h[0].x, h[1].x) && within(h[0].y, v[0].y, v[1].y);
-}
-
-/** through says an axis-aligned segment enters a box's inside, a pixel in
- * from its border. */
-export function through(
-  a: Point,
-  b: Point,
-  r: { x: number; y: number; w: number; h: number },
-): boolean {
-  const x0 = Math.min(a.x, b.x);
-  const x1 = Math.max(a.x, b.x);
-  const y0 = Math.min(a.y, b.y);
-  const y1 = Math.max(a.y, b.y);
-  return (
-    x1 > r.x + 1 && x0 < r.x + r.w - 1 && y1 > r.y + 1 && y0 < r.y + r.h - 1
-  );
 }
 
 /** eachPlaced visits every node the engine placed, zones and what they
