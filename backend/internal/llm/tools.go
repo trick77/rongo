@@ -72,13 +72,15 @@ func (t ToolTurn) Assistant() ToolMessage {
 	return m
 }
 
-// sameCalls says the caller's calls are the reply's, by id and in order.
+// sameCalls says the caller's calls are the reply's, in order and unedited:
+// the replayed blocks carry the original name and input, so a call repaired
+// under the same id would otherwise go out as it was, not as the caller has it.
 func sameCalls(calls []ToolCall, own []llmwire.ToolCall) bool {
 	if len(calls) != len(own) {
 		return false
 	}
 	for i := range calls {
-		if calls[i].ID != own[i].ID {
+		if calls[i].ID != own[i].ID || calls[i].Name != own[i].Name || calls[i].Arguments != own[i].Arguments {
 			return false
 		}
 	}

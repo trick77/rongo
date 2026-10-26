@@ -49,7 +49,7 @@ func TestToolTurn_assistantIsRebuiltOnceTheCallsChange(t *testing.T) {
 	// Given: a turn with two calls, and the replay items that carry both.
 	calls := []ToolCall{{ID: "a", Name: "grep", Arguments: "{}"}, {ID: "b", Name: "grep", Arguments: "{}"}}
 	turn := ToolTurn{Calls: calls, own: llmwire.Message{Role: llmwire.RoleAssistant,
-		ToolCalls:     []llmwire.ToolCall{{ID: "a"}, {ID: "b"}},
+		ToolCalls:     []llmwire.ToolCall{{ID: "a", Name: "grep", Arguments: "{}"}, {ID: "b", Name: "grep", Arguments: "{}"}},
 		ResponseItems: []json.RawMessage{json.RawMessage(`{"type":"thinking"}`)}}}
 
 	// Then: the turn as the model sent it carries its replay items.
@@ -62,6 +62,7 @@ func TestToolTurn_assistantIsRebuiltOnceTheCallsChange(t *testing.T) {
 		"trimmed":   calls[:1],
 		"reordered": {calls[1], calls[0]},
 		"replaced":  {calls[0], {ID: "c", Name: "grep", Arguments: "{}"}},
+		"repaired":  {calls[0], {ID: "b", Name: "grep", Arguments: `{"pattern":"x"}`}},
 	} {
 		turn.Calls = changed
 		if got := turn.Assistant(); got.replay != nil || len(got.Calls) != len(changed) {
@@ -77,7 +78,8 @@ func TestWireMessages_aCallingTurnCarriesItsReplayAndItsResults(t *testing.T) {
 	items := []json.RawMessage{json.RawMessage(`{"type":"thinking","thinking":"x","signature":"s"}`),
 		json.RawMessage(`{"type":"tool_use","id":"a","name":"grep","input":{}}`)}
 	turn := ToolTurn{Calls: []ToolCall{{ID: "a", Name: "grep", Arguments: "{}"}},
-		own: llmwire.Message{Role: llmwire.RoleAssistant, ToolCalls: []llmwire.ToolCall{{ID: "a"}}, ResponseItems: items}}
+		own: llmwire.Message{Role: llmwire.RoleAssistant, ToolCalls: []llmwire.ToolCall{{ID: "a", Name: "grep", Arguments: "{}"}},
+			ResponseItems: items}}
 
 	got := wireMessages([]ToolMessage{{Role: "user", Content: "q"}, turn.Assistant(), ToolResult("a", "hit")})
 

@@ -423,20 +423,19 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 			break
 		}
 
-		// Calls over the limit follow the round's own calls in the trace,
-		// which is the order a reader reads them in.
 		// The model's own turn goes back whole, its signed thinking with it
-		// on the Messages protocol, and the calls over the limit are answered
-		// with a refusal: trimming the turn instead would drop the signed
-		// blocks, which name every call.
+		// on the Messages protocol: trimming it would drop the signed blocks,
+		// which name every call. The calls over the limit are answered with a
+		// refusal after the ones that run, so the results follow the calls'
+		// own order.
 		msgs = append(msgs, turn.Assistant())
 		var overLimit []LocateStep
+		var overCalls []llm.ToolCall
 		if len(turn.Calls) > locateMaxCalls {
-			for _, over := range turn.Calls[locateMaxCalls:] {
+			overCalls = turn.Calls[locateMaxCalls:]
+			for _, over := range overCalls {
 				report.Refused = append(report.Refused, over.Name+"(over the call limit)")
 				overLimit = append(overLimit, callStepOnly(over).refusedAs("", "over the limit of calls in one round"))
-				msgs = append(msgs, llm.ToolResult(over.ID,
-					fmt.Sprintf("Refused: over the limit of %d calls in one round. Ask again next round.", locateMaxCalls)))
 			}
 			turn.Calls = turn.Calls[:locateMaxCalls]
 		}
@@ -533,6 +532,9 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 				break
 			}
 		}
+		for _, over := range overCalls {
+			msgs = append(msgs, llm.ToolResult(over.ID, locateOverLimit))
+		}
 		// The conclusion is asked on the last round AND when the reserve ran
 		// out, which can happen on any round: the stop path is exactly where
 		// the loop landed the most material, so dropping the pointer there
@@ -566,6 +568,8 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 			report.Steps = append(report.Steps, overLimit...)
 			break
 		}
+		// Calls over the limit follow the round's own calls in the trace,
+		// which is the order a reader reads them in.
 		report.Steps = append(report.Steps, overLimit...)
 	}
 	return g.finishLocate(ctx, a, &report, shown, stage), report, nil
@@ -874,6 +878,10 @@ func (s LocateStep) refusedAs(label, why string) LocateStep {
 	s.label, s.NotRun = label, why
 	return s
 }
+
+// locateOverLimit is what a call past locateMaxCalls is told. It promises
+// nothing about a later round: there may be none.
+var locateOverLimit = fmt.Sprintf("Not run: over the limit of %d calls in one round.", locateMaxCalls)
 
 const locateUnparseable = "The arguments were not valid JSON, so nothing was looked up. Send the call again with well-formed arguments."
 

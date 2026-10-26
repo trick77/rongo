@@ -777,8 +777,12 @@ func TestLocate_runsAtMostTheCallLimitPerTurn(t *testing.T) {
 	if len(told) != len(calls) {
 		t.Fatalf("tool results = %d, want one per call the model asked for (%d)", len(told), len(calls))
 	}
-	if refusals := strings.Count(strings.Join(told, "\n"), "over the limit"); refusals != 4 {
-		t.Errorf("refusals told = %d, want the 4 calls over the limit", refusals)
+	// In the calls' own order: the ones that ran first, then the refusals,
+	// so a backend pairing results by position pairs each with its call.
+	for i, got := range told {
+		if over := i >= locateMaxCalls; over != (got == locateOverLimit) {
+			t.Errorf("result %d = %q; want the refusal exactly for the calls past the limit", i, got)
+		}
 	}
 }
 
