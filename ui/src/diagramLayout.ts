@@ -919,6 +919,38 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
         : {}),
     };
   };
+  // The engine reads spacing off the node whose children it places, so a
+  // zone given only its padding laid its members out at the engine's
+  // defaults, its labels 2px from their line. The ordering
+  // options stay on the root, which orders the whole hierarchy; set on a
+  // zone as well, they crashed the engine.
+  const spacing: Record<string, string> = {
+    "elk.spacing.nodeNode": "32",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "40",
+    "elk.spacing.edgeNode": "24",
+    "elk.spacing.edgeEdge": "12",
+    "elk.layered.spacing.edgeEdgeBetweenLayers": "12",
+    "elk.layered.spacing.edgeNodeBetweenLayers": "24",
+    "elk.spacing.edgeLabel": "10",
+    "elk.edgeLabels.placement": "CENTER",
+  };
+  const ordering: Record<string, string> = {
+    "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+    // A cycle is broken at the edge that runs against the order written,
+    // as the spine reads a loop: left to the engine, a state machine's
+    // retry was kept and its forward path reversed, the start dot landing
+    // in the middle of the picture. Greedy, so only a real cycle is
+    // broken: plain MODEL_ORDER reversed every edge written against the
+    // order, and a failure state mentioned early was hung at the top with
+    // every later transition into it climbing up as a loop back. Shared
+    // with flowcharts on purpose: a flowchart's retry is read the same
+    // way, as the edge written against the order. Every corpus flowchart
+    // ELK draws came out byte for byte the same with it.
+    "elk.layered.cycleBreaking.strategy": "GREEDY_MODEL_ORDER",
+    "elk.layered.crossingMinimization.forceNodeModelOrder": "true",
+    "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+    "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
+  };
   const children: ElkNode[] = [];
   const zoneNodes = new Map<string, ElkNode>();
   for (const z of ir.zones) {
@@ -926,6 +958,7 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
       id: `zone:${z.id}`,
       children: [],
       layoutOptions: {
+        ...spacing,
         "elk.padding": `[top=${zonePad.top},left=20,bottom=20,right=20]`,
       },
     };
@@ -954,42 +987,26 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
       "elk.direction": tb ? "DOWN" : "RIGHT",
       "elk.edgeRouting": "ORTHOGONAL",
       "elk.hierarchyHandling": "INCLUDE_CHILDREN",
-      "elk.json.edgeCoords": "ROOT",
       "elk.padding": "[top=0,left=0,bottom=0,right=0]",
-      "elk.spacing.nodeNode": "32",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "40",
-      "elk.spacing.edgeNode": "24",
-      "elk.spacing.edgeEdge": "12",
-      "elk.layered.spacing.edgeEdgeBetweenLayers": "12",
-      "elk.layered.spacing.edgeNodeBetweenLayers": "24",
-      "elk.spacing.edgeLabel": "10",
-      "elk.edgeLabels.placement": "CENTER",
-      "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
-      // A cycle is broken at the edge that runs against the order written,
-      // as the spine reads a loop: left to the engine, a state machine's
-      // retry was kept and its forward path reversed, the start dot landing
-      // in the middle of the picture. Greedy, so only a real cycle is
-      // broken: plain MODEL_ORDER reversed every edge written against the
-      // order, and a failure state mentioned early was hung at the top with
-      // every later transition into it climbing up as a loop back. Shared
-      // with flowcharts on purpose: a flowchart's retry is read the same
-      // way, as the edge written against the order. Every corpus flowchart
-      // ELK draws came out byte for byte the same with it.
-      "elk.layered.cycleBreaking.strategy": "GREEDY_MODEL_ORDER",
-      "elk.layered.crossingMinimization.forceNodeModelOrder": "true",
-      "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
-      "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
+      ...spacing,
+      ...ordering,
     },
     children: kept,
     edges,
   });
 
   const zones: ZoneBox[] = [];
+  // Where each zone's own coordinates start. The engine returns an edge
+  // relative to its container, the zone holding both its ends: this elkjs
+  // ignores elk.json.edgeCoords, and an edge kept inside one zone was drawn
+  // that zone's offset away, over its neighbour.
+  const origin = new Map<string, Point>([["root", { x: 0, y: 0 }]]);
   const walk = (n: ElkNode, ox: number, oy: number) => {
     for (const c of n.children ?? []) {
       const x = ox + (c.x ?? 0);
       const y = oy + (c.y ?? 0);
       if (c.id.startsWith("zone:")) {
+        origin.set(c.id, { x: Math.round(x), y: Math.round(y) });
         const id = c.id.slice(5);
         const title = ir.zones.find((z) => z.id === id)?.title ?? id;
         zones.push({
@@ -1012,7 +1029,10 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
 
   const routes: EdgeRoute[] = (root.edges ?? []).map((e, i) => {
     const ie = ir.edges[i];
-    const points = elkPoints(e);
+    const at =
+      origin.get((e as { container?: string }).container ?? "root") ??
+      origin.get("root")!;
+    const points = elkPoints(e).map((p) => ({ x: p.x + at.x, y: p.y + at.y }));
     const from = boxes.get(ie.from)!;
     const to = boxes.get(ie.to)!;
     if (points.length >= 2) {
@@ -1037,7 +1057,7 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
       head: ie.head,
     };
     const label = elkLabel(e, labels[i]);
-    if (label) route.label = label;
+    if (label) route.label = { ...label, x: label.x + at.x, y: label.y + at.y };
     return route;
   });
   const nodes = ir.nodes.map((n) => boxes.get(n.id)!);
