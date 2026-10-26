@@ -66,10 +66,10 @@ var allBackendEnvVars = []string{
 const testSecret = "0123456789abcdef0123456789abcdef"
 
 var mandatoryEnv = map[string]string{
-	"LLMWIRE_OPENAI_API_KEY": "embed-key",
-	"LLMWIRE_MIMO_API_KEY":   "llm-key",
-	"BACKEND_LLM_MODEL":      "mimo-v2.6-flash",
-	"BACKEND_LLM_GATE_MODEL": "mimo-v2.6-flash",
+	"LLMWIRE_OPENAI_API_KEY":    "embed-key",
+	"LLMWIRE_ANTHROPIC_API_KEY": "llm-key",
+	"BACKEND_LLM_MODEL":         "claude-opus-5-5",
+	"BACKEND_LLM_GATE_MODEL":    "claude-opus-5-5",
 }
 
 func setEnv(t *testing.T, kv map[string]string) {
