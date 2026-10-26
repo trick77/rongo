@@ -433,7 +433,10 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 			}
 			turn.Calls = turn.Calls[:locateMaxCalls]
 		}
-		msgs = append(msgs, llm.AssistantCalls(turn.Content, turn.Calls))
+		// The model's own turn, its signed thinking with it where the
+		// protocol has some (claude-opus-5-5); rebuilt when the limit above
+		// trimmed its calls.
+		msgs = append(msgs, turn.Assistant())
 		stop := false
 		// Which call of this turn the reserve ran out on: the calls after it
 		// are refused, and the count has to index the same list they do.

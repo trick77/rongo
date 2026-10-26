@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/trick77/llmwire"
@@ -47,11 +48,31 @@ type ToolCall struct {
 type ToolTurn struct {
 	Content string
 	Calls   []ToolCall
+
+	// replay is the turn as the protocol replays it (llmwire's
+	// ResponseItems): on claude-opus-5-5 its signed thinking blocks, which a
+	// turn rebuilt from Content and Calls loses, so each round re-thinks
+	// without the earlier reasoning. replayCalls is how many calls it names,
+	// to tell a turn the caller trimmed.
+	replay      []json.RawMessage
+	replayCalls int
 }
 
 // Done reports whether the model stopped asking for tools. A caller loops
 // while this is false and its own round budget is not spent.
 func (t ToolTurn) Done() bool { return len(t.Calls) == 0 }
+
+// Assistant is this turn fed back as the model's own, its replay items with
+// it. A caller that trimmed Calls gets the turn rebuilt from what it kept:
+// the signed blocks name every call, and a call sent without its result is
+// refused.
+func (t ToolTurn) Assistant() ToolMessage {
+	m := AssistantCalls(t.Content, t.Calls)
+	if len(t.Calls) == t.replayCalls {
+		m.replay = t.replay
+	}
+	return m
+}
 
 // ToolMessage is one message of a tool conversation. It is a superset of
 // Message: an assistant turn carries the calls it asked for, and a tool result
@@ -65,11 +86,16 @@ type ToolMessage struct {
 	Content string
 	Calls   []ToolCall
 	CallID  string
+
+	// replay is set by ToolTurn.Assistant only.
+	replay []json.RawMessage
 }
 
-// AssistantCalls is the model's own turn, fed back so the next request carries
-// what it asked for. A tool conversation the assistant turn is missing from is
-// one the model cannot follow.
+// AssistantCalls is an assistant turn built from its text and calls, fed back
+// so the next request carries what was asked for. A tool conversation the
+// assistant turn is missing from is one the model cannot follow. For the
+// model's own turn use ToolTurn.Assistant, which also carries its replay
+// items.
 func AssistantCalls(content string, calls []ToolCall) ToolMessage {
 	return ToolMessage{Role: "assistant", Content: content, Calls: calls}
 }
@@ -116,7 +142,7 @@ func (c *Client) CallTools(ctx context.Context, msgs []ToolMessage, tools []Tool
 	u := usageFrom(resp.Usage)
 	record(ctx, o, c.Deployment(o.lane), u, time.Since(started))
 
-	turn := ToolTurn{Content: resp.Content}
+	turn := ToolTurn{Content: resp.Content, replay: resp.ResponseItems, replayCalls: len(resp.ToolCalls)}
 	for _, call := range resp.ToolCalls {
 		turn.Calls = append(turn.Calls, ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments})
 	}
@@ -145,12 +171,13 @@ func wireMessages(msgs []ToolMessage) []llmwire.Message {
 		switch {
 		case m.CallID != "":
 			out = append(out, llmwire.ToolResult(m.CallID, m.Content))
-		case len(m.Calls) > 0:
+		case len(m.Calls) > 0 || len(m.replay) > 0:
 			calls := make([]llmwire.ToolCall, 0, len(m.Calls))
 			for _, c := range m.Calls {
 				calls = append(calls, llmwire.ToolCall{ID: c.ID, Name: c.Name, Arguments: c.Arguments})
 			}
-			out = append(out, llmwire.Message{Role: llmwire.RoleAssistant, Text: m.Content, ToolCalls: calls})
+			out = append(out, llmwire.Message{Role: llmwire.RoleAssistant, Text: m.Content, ToolCalls: calls,
+				ResponseItems: m.replay})
 		default:
 			out = append(out, llmwire.TextMessage(llmwire.Role(m.Role), m.Content))
 		}

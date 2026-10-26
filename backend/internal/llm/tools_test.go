@@ -9,8 +9,59 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/trick77/llmwire/llmwiretest"
+
+	"github.com/trick77/rongo/internal/llm/llmtest"
 	"github.com/trick77/rongo/internal/usage"
 )
+
+func TestCallTools_replaysTheModelsOwnTurn(t *testing.T) {
+	// Given: a model on the Messages protocol, whose every answer carries a
+	// signed thinking block that has to go back with the next round, as
+	// claude-opus-5-5's does. A turn rebuilt from its text and calls loses
+	// it, and the model re-thinks each round without its earlier reasoning.
+	srv := llmwiretest.NewServer(t)
+	c, err := NewClient(Config{BaseURL: srv.URL, APIKey: "k", Registry: llmtest.Registry(),
+		Answer: llmwiretest.MessagesModel, Gate: llmwiretest.MessagesModel}, srv.Server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs := []ToolMessage{{Role: "user", Content: "Wie wird die Anzahl Haustiere an Ledger uebermittelt?"}}
+	turn, err := c.CallTools(context.Background(), msgs, locateTools())
+	if err != nil {
+		t.Fatalf("CallTools: %v", err)
+	}
+
+	// When: the turn goes back as the model's own.
+	msgs = append(msgs, turn.Assistant(), ToolMessage{Role: "user", Content: "und weiter?"})
+	if _, err := c.CallTools(context.Background(), msgs, locateTools()); err != nil {
+		t.Fatalf("CallTools, round 2: %v", err)
+	}
+
+	// Then: the signed block is on the wire.
+	if !srv.Last().ReplayedThinking() {
+		t.Error("round 2 did not carry the model's signed thinking back")
+	}
+}
+
+func TestToolTurn_assistantIsRebuiltOnceTheCallsAreTrimmed(t *testing.T) {
+	// Given: a turn with two calls, and the replay items that carry both.
+	calls := []ToolCall{{ID: "a", Name: "grep", Arguments: "{}"}, {ID: "b", Name: "grep", Arguments: "{}"}}
+	turn := ToolTurn{Calls: calls, replay: []json.RawMessage{json.RawMessage(`{"type":"thinking"}`)}, replayCalls: 2}
+
+	// When: the caller keeps only the first call, as locate does over its limit.
+	turn.Calls = turn.Calls[:1]
+
+	// Then: the signed blocks cannot go back without the call they name; the
+	// turn goes back rebuilt from what the caller kept.
+	if got := turn.Assistant(); got.replay != nil || len(got.Calls) != 1 {
+		t.Errorf("trimmed turn = %+v, want rebuilt with one call", got)
+	}
+	turn.Calls = calls
+	if got := turn.Assistant(); got.replay == nil {
+		t.Error("an untrimmed turn lost its replay items")
+	}
+}
 
 // The tools here are the ones the locate loop actually gives the model, and
 // the arguments are terms from the question that motivated it ("wie wird die

@@ -65,6 +65,16 @@ Wall-clock for both runs: mimo-v2.6-flash 3599s, claude-opus-5-5 1259s.
   from it would switch the grader with the example: keep
   `BACKEND_LLM_MODEL` and `_GATE_MODEL` at mimo-v2.6-flash in the eval
   `.env` and put a candidate in `BACKEND_EVAL_*`, as this one did.
+- **The answer eval does not run the locate loop.** `TestEvalMeasureAnswers`
+  builds its gatherer without `WithLocateLoop`; the product turns it on
+  (`BACKEND_LOCATE_ROUNDS`, 3). The loop now replays the model's own turn
+  (`ToolTurn.Assistant`) so Opus keeps its signed thinking across rounds
+  instead of re-thinking each one. Checked live with `TestLocateAnswer` on
+  this corpus ("Where is the shipping cost added to the order total?",
+  needle 4.99 in `OrdersController.java`): loop off, 1 round and 3 rounds
+  all ran on Opus with the replay and no wire error. None found the
+  constant: the loop's own greps inside orders were refused by the scope
+  narrowing, which predates this change and is the same on any model.
 - **Dearer per token.** About 1M tokens a run against 0.55-0.66M, at list
   rate $4 / $20 per million (llmwire's profile prices each call). A
   deployment that names Opus pays that; mimo-v2.6-flash stays a profile id
