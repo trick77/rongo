@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -104,6 +106,54 @@ func TestLLMRerank_putsWhatTheModelPickedFirstAndKeepsTheRest(t *testing.T) {
 	}
 	if !strings.Contains(seen.prompt, "[3] peeq c.go (c)") || !strings.Contains(seen.prompt, "// c is the answer") {
 		t.Errorf("the model was not shown the numbered headers and excerpts:\n%s", seen.prompt)
+	}
+}
+
+// TestLLMRerank_readsNumbersWrappedInLists: a gate model answered
+// {"relevant":[[1],[2],[5]]} in every eval run, nine replies over three, and
+// each kept the fused order as unreadable. A one-number list is that number.
+func TestLLMRerank_readsNumbersWrappedInLists(t *testing.T) {
+	hits := []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}}
+	r := NewLLMReranker(rerankLLM(t, `{"relevant":[[3],[1]]}`, nil), 60)
+	got, err := r.Rerank(context.Background(), "q", hits, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].ChunkID != 3 || got[1].ChunkID != 1 || got[2].ChunkID != 2 {
+		t.Errorf("order = %+v, want chunks 3, 1, 2", got)
+	}
+}
+
+// TestLLMRerank_skipsAListHoldingMoreThanANumber: [3,1] inside the list could
+// be a pair or a range; guessing which is the reranker doing worse than
+// nothing. Only that entry is left out — the picks beside it, a null among
+// them, still count.
+func TestLLMRerank_skipsAListHoldingMoreThanANumber(t *testing.T) {
+	hits := []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}, {ChunkID: 4}}
+	for reply, want := range map[string][]int64{
+		`{"relevant":[[3,1]]}`:              {1, 2, 3, 4},
+		`{"relevant":[[]]}`:                 {1, 2, 3, 4},
+		`{"relevant":[["3"],[null]]}`:       {1, 2, 3, 4},
+		`{"relevant":[[4],[2,3],null,[3]]}`: {4, 3, 1, 2},
+		`{"relevant":[[2],4]}`:              {2, 4, 1, 3},
+	} {
+		var logs strings.Builder
+		r := NewLLMReranker(rerankLLM(t, reply, nil), 60)
+		r.Log = slog.New(slog.NewTextHandler(&logs, nil))
+		got, err := r.Rerank(context.Background(), "q", hits, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := make([]int64, len(got))
+		for i, h := range got {
+			ids[i] = h.ChunkID
+		}
+		if !slices.Equal(ids, want) {
+			t.Errorf("%s: order = %v, want %v", reply, ids, want)
+		}
+		if logs.Len() > 0 {
+			t.Errorf("%s: a readable reply logged %q", reply, logs.String())
+		}
 	}
 }
 
