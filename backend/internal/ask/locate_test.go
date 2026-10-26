@@ -780,9 +780,17 @@ func TestLocate_runsAtMostTheCallLimitPerTurn(t *testing.T) {
 	// In the calls' own order: the ones that ran first, then the refusals,
 	// so a backend pairing results by position pairs each with its call.
 	for i, got := range told {
-		if over := i >= locateMaxCalls; over != (got == locateOverLimit) {
+		if over := i >= locateMaxCalls; over != strings.HasPrefix(got, locateOverLimit) {
 			t.Errorf("result %d = %q; want the refusal exactly for the calls past the limit", i, got)
 		}
+	}
+	// Rounds remain after the first, so the refusal says the call may come
+	// back; on the last round it promises nothing.
+	if last := told[len(told)-1]; !strings.Contains(last, "again next round") {
+		t.Errorf("refusal with rounds left = %q, want it to say the call may be asked again", last)
+	}
+	if got := locateOverLimitText(false); got != locateOverLimit {
+		t.Errorf("refusal on the last round = %q, want no promise of a later round", got)
 	}
 }
 

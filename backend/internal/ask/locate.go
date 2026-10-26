@@ -526,14 +526,13 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 				// conclusion asked after this point would fail the request
 				// rather than return a pointer.
 				for _, rest := range turn.Calls[ci+1:] {
-					msgs = append(msgs, llm.ToolResult(rest.ID,
-						"Not run: the budget for this step is spent."))
+					msgs = append(msgs, llm.ToolResult(rest.ID, locateBudgetSpent))
 				}
 				break
 			}
 		}
 		for _, over := range overCalls {
-			msgs = append(msgs, llm.ToolResult(over.ID, locateOverLimit))
+			msgs = append(msgs, llm.ToolResult(over.ID, locateOverLimitText(round < g.rounds()-1 && !stop)))
 		}
 		// The conclusion is asked on the last round AND when the reserve ran
 		// out, which can happen on any round: the stop path is exactly where
@@ -879,9 +878,20 @@ func (s LocateStep) refusedAs(label, why string) LocateStep {
 	return s
 }
 
-// locateOverLimit is what a call past locateMaxCalls is told. It promises
-// nothing about a later round: there may be none.
+// locateOverLimit is what a call past locateMaxCalls is told; with another
+// round to come, locateOverLimitText adds that it may be asked for again.
 var locateOverLimit = fmt.Sprintf("Not run: over the limit of %d calls in one round.", locateMaxCalls)
+
+func locateOverLimitText(laterRound bool) string {
+	if laterRound {
+		return locateOverLimit + " Ask for it again next round if it still matters."
+	}
+	return locateOverLimit
+}
+
+// locateBudgetSpent is what a call after the one the reserve ran out on is
+// told.
+const locateBudgetSpent = "Not run: the budget for this step is spent."
 
 const locateUnparseable = "The arguments were not valid JSON, so nothing was looked up. Send the call again with well-formed arguments."
 
