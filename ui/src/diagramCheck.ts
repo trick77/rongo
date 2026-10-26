@@ -15,8 +15,9 @@ import { ramp, textWidth } from "./diagramTheme";
  * every hand-drawn diagram to (references/primitives-core.md), checked on a
  * computed layout. Every arrow straight or bent at right angles, leaving and
  * entering a box square to its edge; never behind a box it does not
- * connect; no two arrows on one stretch of line or one attach point; every
- * label clear of its line and of every box; every label inside its box.
+ * connect; no two arrows on one stretch of line or one attach point, and
+ * none crossing another; every label clear of its line and of every box;
+ * every label inside its box.
  * corpus.test.ts runs it over every corpus diagram, so a layout change that
  * breaks one fails a test rather than a picture.
  *
@@ -28,7 +29,13 @@ type Rect = { x: number; y: number; w: number; h: number };
 /** The least clear space between a label and its own line. */
 export const minLabelGap = 6;
 
-export function check(l: FlowLayout): string[] {
+/** A mapping keeps both its columns in the order written, so an arrow
+ * crossing another is the mapping's own: its caller says so with
+ * `written`, and the crossing rule is not held against it. */
+export function check(
+  l: FlowLayout,
+  opts: { written?: boolean } = {},
+): string[] {
   const out: string[] = [];
   const byId = new Map(l.nodes.map((n) => [n.id, n]));
 
@@ -105,6 +112,15 @@ export function check(l: FlowLayout): string[] {
       const fends = [f.points[0], f.points[f.points.length - 1]];
       if (ends.some((p) => fends.some((q) => p.x === q.x && p.y === q.y)))
         out.push(`${name} and ${other}: share an attach point`);
+      // No two connectors cross: a person drawing it would have swapped
+      // the branches instead.
+      if (
+        !opts.written &&
+        segments(e.points).some(([a, b]) =>
+          segments(f.points).some(([c, d]) => cut(a, b, c, d)),
+        )
+      )
+        out.push(`${name} and ${other}: cross`);
       if (e.label && f.label && overlaps(e.label, f.label))
         out.push(`${name} and ${other}: labels overlap`);
     }
@@ -114,7 +130,9 @@ export function check(l: FlowLayout): string[] {
 
 /** checkER holds an entity model to the flow's connector rules, every text
  * inside its table, and each line's ends straight for long enough to
- * carry their cardinality marks. */
+ * carry their cardinality marks. No two relationships crossing is one of
+ * those rules on purpose: the engine places the tables free of any written
+ * order, so a crossing it leaves reads as badly as a flowchart's. */
 export function checkER(l: ERLayout): string[] {
   const out = check(l);
   for (const n of l.nodes) {
@@ -299,6 +317,25 @@ function crosses(a: Point, b: Point, r: Rect): boolean {
   const y0 = Math.min(a.y, b.y);
   const y1 = Math.max(a.y, b.y);
   return x1 > r.x && x0 < r.x + r.w && y1 > r.y && y0 < r.y + r.h;
+}
+
+/** cut says a horizontal and a vertical segment cross inside both: one
+ * meeting the other at an end is not a crossing. */
+function cut(a: Point, b: Point, c: Point, d: Point): boolean {
+  const h1 = a.y === b.y;
+  if (h1 === (c.y === d.y)) return false;
+  const [h, v] = h1
+    ? [
+        [a, b],
+        [c, d],
+      ]
+    : [
+        [c, d],
+        [a, b],
+      ];
+  const within = (p: number, q: number, r: number) =>
+    p > Math.min(q, r) && p < Math.max(q, r);
+  return within(v[0].x, h[0].x, h[1].x) && within(h[0].y, v[0].y, v[1].y);
 }
 
 function overlaps(a: Rect, b: Rect): boolean {

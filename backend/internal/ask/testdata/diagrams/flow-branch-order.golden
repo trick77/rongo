@@ -1,0 +1,23 @@
+Eine Meldung wird erst auf Dubletten geprüft und danach, falls aktiviert, beim ZAS gegen das Geburtsdatum abgeglichen [1][2].
+
+Das Diagramm zeigt die Reihenfolge der Prüfungen [1][2].
+
+```mermaid
+flowchart TD
+  v["Validierung Versicherte Person"] --> d{"Dublette gefunden?"}
+  d -->|"ja, mit Schadennummer"| r["Dublette-Ergebnis zurückgeben"]
+  d -->|"ja, ohne Schadennummer"| x["Meldung abgelehnt"]
+  d -->|"nein"| z{"ZAS-Check aktiviert?"}
+  z -->|"nein"| ok["Meldung gültig"]
+  z -->|"ja"| sv{"SV-Nummer erfasst?"}
+  sv -->|"nein"| ok
+  sv -->|"ja"| g["Geburtsdatum beim ZAS abfragen"]:::focus
+  g --> b{"Belastbare Antwort?"}
+  b -->|"exaktes Datum geliefert"| di{"Datum identisch?"}:::focus
+  b -->|"kein Fehler, kein exaktes Datum"| ok
+  b -->|"AHV-Nummer unbekannt"| no["Meldung abgelehnt"]:::focus
+  di -->|"ja"| ok
+  di -->|"nein"| no
+```
+
+Ohne SV-Nummer gilt die Meldung ohne Abfrage beim ZAS als gültig [2].

@@ -1,4 +1,4 @@
-import type { ElkExtendedEdge, ElkNode, ElkPort } from "elkjs/lib/elk-api";
+import type { ElkExtendedEdge, ElkNode } from "elkjs/lib/elk-api";
 import type { FlowEdgeIR, FlowIR, FlowNodeIR } from "./diagramIR";
 import { ramp, textWidth, wrap, type Face } from "./diagramTheme";
 
@@ -320,15 +320,15 @@ export function layoutSpine(ir: FlowIR): FlowLayout | null {
 
   // A node's left side takes the lanes: a diamond has one corner there, a
   // box room for two.
-  const leftUse = new Map<string, number>();
+  const lanesAt = new Map<string, number[]>();
   for (const i of laneEdges) {
     for (const id of [ir.edges[i].from, ir.edges[i].to])
-      leftUse.set(id, (leftUse.get(id) ?? 0) + 1);
+      lanesAt.set(id, [...(lanesAt.get(id) ?? []), i]);
   }
   const byId = new Map(ir.nodes.map((n) => [n.id, n]));
-  for (const [id, k] of leftUse) {
+  for (const [id, lanes] of lanesAt) {
     const one = ["decision", "start", "stop"].includes(byId.get(id)!.shape);
-    if (k > (one ? 1 : 2)) return null;
+    if (lanes.length > (one ? 1 : 2)) return null;
   }
 
   // Sizes: the path's boxes share a width, the outcomes theirs.
@@ -464,23 +464,28 @@ export function layoutSpine(ir: FlowIR): FlowLayout | null {
       return { i, lo: Math.min(a, b), hi: Math.max(a, b) };
     })
     .sort((p, q) => p.hi - p.lo - (q.hi - q.lo) || p.i - q.i);
-  const used = new Map<string, number>();
+  // A box two lanes meet takes the one heading up above the one heading
+  // down. Two heading the same way nest: the inner one meets the box nearer
+  // where both run, so the outer one's stub never cuts the inner lane. The
+  // inner one taking the top whichever way it ran had a skip down out of a
+  // box cross the loop back into it.
+  const span = new Map(spans.map((s, k) => [s.i, { ...s, k }]));
   let lx = pathLeft - 32;
   for (const s of spans) {
     const e = ir.edges[s.i];
     const a = boxes.get(e.from)!;
     const b = boxes.get(e.to)!;
     const port = (n: NodeBox) => {
-      const k = used.get(n.id) ?? 0;
-      used.set(n.id, k + 1);
       const mid = rowY.get(n.id)!;
-      if (
-        n.kind === "decision" ||
-        dotted(n.kind) ||
-        (leftUse.get(n.id) ?? 0) < 2
-      )
+      const lanes = lanesAt.get(n.id)!;
+      if (n.kind === "decision" || dotted(n.kind) || lanes.length < 2)
         return mid;
-      return mid + (k === 0 ? -8 : 8);
+      const [inner, outer] = lanes
+        .map((i) => span.get(i)!)
+        .sort((p, q) => p.k - q.k);
+      // Heading up from this box: the box is the lane's lower end.
+      const upper = inner.hi === mid ? inner : outer;
+      return mid + (upper.i === s.i ? -8 : 8);
     };
     const leftOf = (n: NodeBox) => n.x;
     const y0 = port(a);
@@ -857,9 +862,18 @@ type Side = "NORTH" | "SOUTH" | "EAST" | "WEST";
 
 /** layoutElk places a flowchart of any other shape with ELK's layered
  * layout, boxes sized and styled as the spine's are. A diamond gets a port
- * per edge on the side the convention gives it — in at the top, the first
- * branch straight on, the second right, the third left — and every end on a
- * diamond is moved from its bounding box onto its outline. */
+ * per edge: in at the top, and each branch out of the corner facing where
+ * its target lies, and every end on a diamond is moved from its bounding
+ * box onto its outline.
+ *
+ * Where a target lies is only known once it is placed, so a graph with a
+ * diamond of two or more branches is laid out twice: first with the sides
+ * left to the engine, which places the targets so their branches do not
+ * cross, then with the sides read off that placement. Corners fixed by the order written (first
+ * branch straight on, second right, third left) crossed whenever the
+ * engine put the second branch's target left of the first's. Left free in
+ * the drawing itself, a loop back entered a diamond from below and the
+ * branches left partway down its slopes. */
 export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
   const tb = ir.direction === "TB";
   const w = boxWidth(
@@ -871,24 +885,14 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
   for (const n of ir.nodes)
     boxes.set(n.id, shaped(n, n.shape === "pill" ? "pill" : "step", w));
 
-  const sides = {
-    in: (tb ? "NORTH" : "WEST") as Side,
-    out: (tb
-      ? ["SOUTH", "EAST", "WEST"]
-      : ["EAST", "SOUTH", "NORTH"]) as Side[],
-  };
-  const ports = new Map<string, ElkPort[]>();
-  const addPort = (node: string, id: string, side: Side) => {
+  // A port knows the node at its edge's other end: an out port's side is
+  // read off where that node was placed.
+  const ports = new Map<string, { id: string; out: boolean; far: string }[]>();
+  const addPort = (node: string, id: string, out: boolean, far: string) => {
     const list = ports.get(node) ?? [];
-    list.push({
-      id,
-      width: 0,
-      height: 0,
-      layoutOptions: { "elk.port.side": side },
-    });
+    list.push({ id, out, far });
     ports.set(node, list);
   };
-  const outCount = new Map<string, number>();
   const src: string[] = [];
   const dst: string[] = [];
   ir.edges.forEach((e, i) => {
@@ -896,18 +900,17 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
     dst.push(e.to);
     if (e.from === e.to) return;
     if (boxes.get(e.from)!.kind === "decision") {
-      const k = outCount.get(e.from) ?? 0;
-      outCount.set(e.from, k + 1);
       src[i] = `${e.from}__out${i}`;
-      addPort(e.from, src[i], sides.out[k] ?? sides.out[0]);
+      addPort(e.from, src[i], true, e.to);
     }
     if (boxes.get(e.to)!.kind === "decision") {
       dst[i] = `${e.to}__in${i}`;
-      addPort(e.to, dst[i], sides.in);
+      addPort(e.to, dst[i], false, e.from);
     }
   });
 
-  const leaf = (n: FlowNodeIR): ElkNode => {
+  // No sides yet is the first pass: the engine picks them.
+  const leaf = (n: FlowNodeIR, sides: Map<string, Side> | null): ElkNode => {
     const b = boxes.get(n.id)!;
     const p = ports.get(n.id);
     return {
@@ -915,7 +918,19 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
       width: b.w,
       height: b.h,
       ...(p
-        ? { ports: p, layoutOptions: { "elk.portConstraints": "FIXED_SIDE" } }
+        ? {
+            ports: p.map(({ id }) => ({
+              id,
+              width: 0,
+              height: 0,
+              ...(sides
+                ? { layoutOptions: { "elk.port.side": sides.get(id)! } }
+                : {}),
+            })),
+            layoutOptions: {
+              "elk.portConstraints": sides ? "FIXED_SIDE" : "FREE",
+            },
+          }
         : {}),
     };
   };
@@ -951,60 +966,72 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
     "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
     "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
   };
-  const children: ElkNode[] = [];
-  const zoneNodes = new Map<string, ElkNode>();
-  for (const z of ir.zones) {
-    const zn: ElkNode = {
-      id: `zone:${z.id}`,
-      children: [],
-      layoutOptions: {
-        ...spacing,
-        "elk.padding": `[top=${zonePad.top},left=${zonePad.side},bottom=${zonePad.bottom},right=${zonePad.side}]`,
-      },
-    };
-    zoneNodes.set(z.id, zn);
-    children.push(zn);
-  }
-  for (const n of ir.nodes) {
-    const z = n.zone !== undefined ? zoneNodes.get(n.zone) : undefined;
-    (z ? z.children! : children).push(leaf(n));
-  }
-  // A zone nothing landed in is not drawn: an empty frame says nothing.
-  const kept = children.filter(
-    (c) => !c.id.startsWith("zone:") || c.children!.length > 0,
-  );
   const labels = ir.edges.map((e) =>
     e.label !== "" ? labelBox(e.label) : null,
   );
-  const edges = ir.edges.map((e, i) =>
-    elkEdge(`e${i}`, src[i], dst[i], e.label, labels[i]),
-  );
+  const elkRoute = elkRouteFor(ir, labels, tb);
+  // Built afresh for each pass: the engine writes its result into the
+  // graph it is given.
+  const graph = (sides: Map<string, Side> | null): ElkNode => {
+    const children: ElkNode[] = [];
+    const zoneNodes = new Map<string, ElkNode>();
+    for (const z of ir.zones) {
+      const zn: ElkNode = {
+        id: `zone:${z.id}`,
+        children: [],
+        layoutOptions: {
+          ...spacing,
+          "elk.padding": `[top=${zonePad.top},left=${zonePad.side},bottom=${zonePad.bottom},right=${zonePad.side}]`,
+        },
+      };
+      zoneNodes.set(z.id, zn);
+      children.push(zn);
+    }
+    for (const n of ir.nodes) {
+      const z = n.zone !== undefined ? zoneNodes.get(n.zone) : undefined;
+      (z ? z.children! : children).push(leaf(n, sides));
+    }
+    return {
+      id: "root",
+      layoutOptions: {
+        "elk.algorithm": "layered",
+        "elk.direction": tb ? "DOWN" : "RIGHT",
+        "elk.edgeRouting": "ORTHOGONAL",
+        "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+        "elk.padding": "[top=0,left=0,bottom=0,right=0]",
+        ...spacing,
+        ...ordering,
+      },
+      // A zone nothing landed in is not drawn: an empty frame says nothing.
+      children: children.filter(
+        (c) => !c.id.startsWith("zone:") || c.children!.length > 0,
+      ),
+      edges: ir.edges.map((e, i) =>
+        elkEdge(`e${i}`, src[i], dst[i], e.label, labels[i]),
+      ),
+    };
+  };
 
-  const root = await elk.layout({
-    id: "root",
-    layoutOptions: {
-      "elk.algorithm": "layered",
-      "elk.direction": tb ? "DOWN" : "RIGHT",
-      "elk.edgeRouting": "ORTHOGONAL",
-      "elk.hierarchyHandling": "INCLUDE_CHILDREN",
-      "elk.padding": "[top=0,left=0,bottom=0,right=0]",
-      ...spacing,
-      ...ordering,
-    },
-    children: kept,
-    edges,
-  });
+  const entry: Side = tb ? "NORTH" : "WEST";
+  const [before, on, after]: Side[] = tb
+    ? ["WEST", "SOUTH", "EAST"]
+    : ["NORTH", "EAST", "SOUTH"];
+  // A diamond with one branch sends it straight on: nothing to choose
+  // between, so no first pass to pay for.
+  const straight = new Map<string, Side>();
+  for (const list of ports.values())
+    for (const p of list) straight.set(p.id, p.out ? on : entry);
 
-  const zones: ZoneBox[] = [];
-  // Where each zone's own coordinates start. The engine returns an edge
-  // relative to its container, the zone holding both its ends: this elkjs
-  // ignores elk.json.edgeCoords, and an edge kept inside one zone was drawn
-  // that zone's offset away, over its neighbour.
-  const origin = new Map<string, Point>([["root", atRoot]]);
-  const walk = (n: ElkNode, ox: number, oy: number) => {
-    for (const c of n.children ?? []) {
-      const x = ox + (c.x ?? 0);
-      const y = oy + (c.y ?? 0);
+  const draw = (root: ElkNode): FlowLayout => {
+    // Copies, so a drawing tried and dropped leaves no mark on the next.
+    const placed = new Map<string, NodeBox>();
+    const zones: ZoneBox[] = [];
+    // Where each zone's own coordinates start. The engine returns an edge
+    // relative to its container, the zone holding both its ends: this elkjs
+    // ignores elk.json.edgeCoords, and an edge kept inside one zone was
+    // drawn that zone's offset away, over its neighbour.
+    const origin = new Map<string, Point>([["root", atRoot]]);
+    eachPlaced(root, (c, x, y) => {
       if (c.id.startsWith("zone:")) {
         origin.set(c.id, { x, y });
         const id = c.id.slice(5);
@@ -1012,22 +1039,73 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
         zones.push({
           id,
           title,
-          x: Math.round(x),
-          y: Math.round(y),
-          w: Math.round(c.width ?? 0),
-          h: Math.round(c.height ?? 0),
+          x: px(x),
+          y: px(y),
+          w: px(c.width ?? 0),
+          h: px(c.height ?? 0),
         });
-        walk(c, x, y);
-        continue;
+        return;
       }
-      const b = boxes.get(c.id)!;
-      b.x = Math.round(x);
-      b.y = Math.round(y);
-    }
+      placed.set(c.id, { ...boxes.get(c.id)!, x: px(x), y: px(y) });
+    });
+    const routes = (root.edges ?? []).map((e, i) =>
+      elkRoute(e, i, origin, placed),
+    );
+    const nodes = ir.nodes.map((n) => placed.get(n.id)!);
+    widenForTitles(nodes, routes, zones);
+    return frame(nodes, routes, zones);
   };
-  walk(root, 0, 0);
 
-  const routes: EdgeRoute[] = (root.edges ?? []).map((e, i) => {
+  const branching = [...ports.values()].some(
+    (list) => list.filter((p) => p.out).length >= 2,
+  );
+  if (!branching) return draw(await elk.layout(graph(straight)));
+
+  const first = await elk.layout(graph(null));
+  // Across the flow (left to right going down) and along it.
+  const across = new Map<string, number>();
+  const along = new Map<string, number>();
+  eachPlaced(first, (c, x, y) => {
+    const cx = x + (c.width ?? 0) / 2;
+    const cy = y + (c.height ?? 0) / 2;
+    across.set(c.id, tb ? cx : cy);
+    along.set(c.id, tb ? cy : cx);
+  });
+  const corners = new Map<string, Side>();
+  for (const [node, list] of ports) {
+    type P = (typeof list)[number];
+    const off = (p: P) => across.get(p.far)! - across.get(node)!;
+    // The branch whose target lies nearest straight on goes straight on,
+    // the first written on a tie; every other one out of the corner on the
+    // side its target lies. Of two or more, a branch back to an earlier
+    // step never goes straight on: it turned back up across its siblings.
+    let ahead: P | undefined;
+    for (const p of list) {
+      if (!p.out || along.get(p.far)! <= along.get(node)!) continue;
+      if (!ahead || Math.abs(off(p)) < Math.abs(off(ahead))) ahead = p;
+    }
+    for (const p of list)
+      corners.set(
+        p.id,
+        !p.out ? entry : p === ahead ? on : off(p) < 0 ? before : after,
+      );
+  }
+  return draw(await elk.layout(graph(corners)));
+}
+
+/** elkRouteFor reads a flowchart's edges as the engine laid them out, each
+ * end moved onto the diamond or dot it meets. */
+function elkRouteFor(
+  ir: FlowIR,
+  labels: ({ lines: string[]; w: number; h: number } | null)[],
+  tb: boolean,
+) {
+  return (
+    e: ElkExtendedEdge,
+    i: number,
+    origin: Map<string, Point>,
+    boxes: Map<string, NodeBox>,
+  ): EdgeRoute => {
     const ie = ir.edges[i];
     const container = (e as { container?: string }).container;
     const at = origin.get(container ?? "");
@@ -1062,10 +1140,23 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
     const label = elkLabel(e, labels[i], at);
     if (label) route.label = label;
     return route;
-  });
-  const nodes = ir.nodes.map((n) => boxes.get(n.id)!);
-  widenForTitles(nodes, routes, zones);
-  return frame(nodes, routes, zones);
+  };
+}
+
+/** eachPlaced visits every node the engine placed, zones and what they
+ * hold, with where it sits in the root's coordinates. */
+function eachPlaced(
+  n: ElkNode,
+  f: (c: ElkNode, x: number, y: number) => void,
+  ox = 0,
+  oy = 0,
+) {
+  for (const c of n.children ?? []) {
+    const x = ox + (c.x ?? 0);
+    const y = oy + (c.y ?? 0);
+    f(c, x, y);
+    eachPlaced(c, f, x, y);
+  }
 }
 
 /** elkEdge is an edge for the engine, carrying its label's measured box so
@@ -1092,6 +1183,14 @@ export function elkEdge(
  * so an edge end lands where its box was rounded to. */
 const atRoot: Point = { x: 0, y: 0 };
 
+/** px puts a coordinate the engine computed on a whole pixel. Its
+ * arithmetic gave one straight line's bend 39.5 and its end
+ * 39.49999999999999, and rounded apart they drew a slant; every box, zone,
+ * point and label goes through here, so an end still lands on its box. */
+export function px(v: number): number {
+  return Math.round(Math.round(v * 1e6) / 1e6);
+}
+
 /** elkPoints is an edge's route as the engine laid it out, on whole pixels
  * and without the points rounding made redundant. */
 export function elkPoints(e: ElkExtendedEdge, at: Point = atRoot): Point[] {
@@ -1099,8 +1198,8 @@ export function elkPoints(e: ElkExtendedEdge, at: Point = atRoot): Point[] {
   if (!sec) return [];
   return tidy(
     [sec.startPoint, ...(sec.bendPoints ?? []), sec.endPoint].map((p) => ({
-      x: Math.round(at.x + p.x),
-      y: Math.round(at.y + p.y),
+      x: px(at.x + p.x),
+      y: px(at.y + p.y),
     })),
   );
 }
@@ -1116,8 +1215,8 @@ export function elkLabel(
   if (!l || !box) return undefined;
   return {
     ...box,
-    x: Math.round(at.x + (l.x ?? 0)),
-    y: Math.round(at.y + (l.y ?? 0)),
+    x: px(at.x + (l.x ?? 0)),
+    y: px(at.y + (l.y ?? 0)),
   };
 }
 
@@ -1187,23 +1286,24 @@ export function onCircle(n: NodeBox, end: Point, next: Point): Point {
     const dx = end.x - cx;
     if (Math.abs(dx) >= r) return end;
     const dy = Math.sqrt(r * r - dx * dx);
-    return { x: end.x, y: Math.round(cy + Math.sign(next.y - cy) * dy) };
+    return { x: end.x, y: px(cy + Math.sign(next.y - cy) * dy) };
   }
   const dy = end.y - cy;
   if (Math.abs(dy) >= r) return end;
   const dx = Math.sqrt(r * r - dy * dy);
-  return { x: Math.round(cx + Math.sign(next.x - cx) * dx), y: end.y };
+  return { x: px(cx + Math.sign(next.x - cx) * dx), y: end.y };
 }
 
 /** onDiamond moves an edge's end from the diamond's bounding box onto its
- * outline, along the segment that reaches it. */
+ * outline, along the segment that reaches it, on a whole pixel as every
+ * other end is. */
 export function onDiamond(n: NodeBox, end: Point, next: Point): Point {
   const cx = n.x + n.w / 2;
   const cy = n.y + n.h / 2;
   if (end.x === next.x) {
     const t = Math.max(0, 1 - Math.abs(end.x - cx) / (n.w / 2));
-    return { x: end.x, y: cy + Math.sign(next.y - cy) * (n.h / 2) * t };
+    return { x: end.x, y: px(cy + Math.sign(next.y - cy) * (n.h / 2) * t) };
   }
   const t = Math.max(0, 1 - Math.abs(end.y - cy) / (n.h / 2));
-  return { x: cx + Math.sign(next.x - cx) * (n.w / 2) * t, y: end.y };
+  return { x: px(cx + Math.sign(next.x - cx) * (n.w / 2) * t), y: end.y };
 }
