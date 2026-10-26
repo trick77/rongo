@@ -1,9 +1,10 @@
 # claude-opus-5-5 on both lanes
 
 **Status: measured 2026-10-26 on the flow corpus, BA audience, two runs per
-arm, both arms against ONE database. Opus on both lanes held every rubric
-number of the mimo-v2.6-flash baseline or beat it, contradicted nothing,
-answered every question, and finished in a third of the wall-clock time.
+arm, both arms against ONE database. Opus on both lanes matched or beat the
+mimo-v2.6-flash baseline on rubric present and cited parts, contradicted
+nothing, answered every question, and finished in a third of the wall-clock
+time; it asserted one forbidden claim in run 1 where mimo asserted none.
 Shipped as the example lane model in `.env.example`.**
 
 ## Why
@@ -52,6 +53,18 @@ Wall-clock for both runs: mimo-v2.6-flash 3599s, claude-opus-5-5 1259s.
 - **Faster, not slower.** A third of mimo's wall-clock, with the same
   questions, retrieval and judge. The 2026-09-23 lane choice was made on
   speed; Opus does not lose it.
+- **No call ran out of room.** Opus cannot switch thinking off, so even the
+  gate calls (title 48, route 128, understand 512, locate 700 answer
+  tokens) think at effort low inside the answer budget plus llmwire's
+  unmeasured 1024-token allowance. No call in either run ended on
+  `length`. A prompt that thinks harder than these did would; a measured
+  `reasoning.overhead` in llmwire's profile is the fix if one shows up.
+- **The judge is the product model.** `judgeLLM` reads
+  `BACKEND_LLM_MODEL`, and every number on record was graded by
+  mimo-v2.6-flash. `.env.example` now names Opus, so a measurement started
+  from it would switch the grader with the example: keep
+  `BACKEND_LLM_MODEL` and `_GATE_MODEL` at mimo-v2.6-flash in the eval
+  `.env` and put a candidate in `BACKEND_EVAL_*`, as this one did.
 - **Dearer per token.** About 1M tokens a run against 0.55-0.66M, at list
   rate $4 / $20 per million (llmwire's profile prices each call). A
   deployment that names Opus pays that; mimo-v2.6-flash stays a profile id
