@@ -311,6 +311,46 @@ describe("layoutElk", () => {
     expect(a.x).toBeGreaterThanOrEqual(z.x);
     expect(a.y + a.h).toBeLessThanOrEqual(z.y + z.h);
   });
+
+  // The engine returns an edge whose ends share a zone relative to that
+  // zone; drawn as given, zone b's edges landed over zone a. Decision to
+  // decision, because check() re-projects a diamond's end and cannot see it.
+  it("draws an edge inside a zone inside that zone, from end to end", async () => {
+    const ir = flow(
+      [
+        { ...n("a1", "first?", "decision"), zone: "a" },
+        { ...n("a2", "second?", "decision"), zone: "a" },
+        { ...n("b1", "third?", "decision"), zone: "b" },
+        { ...n("b2", "fourth?", "decision"), zone: "b" },
+      ],
+      [e("a1", "a2", "yes"), e("b1", "b2", "no")],
+      {
+        zones: [
+          { id: "a", title: "Left" },
+          { id: "b", title: "Right" },
+        ],
+      },
+    );
+    const l = await layoutElk(ir, new ELK());
+    for (const r of l.edges) {
+      const z = l.zones.find((z) => z.id === r.from[0])!;
+      const [from, to] = [box(l, r.from), box(l, r.to)];
+      const first = r.points[0];
+      const last = r.points[r.points.length - 1];
+      for (const p of r.points) {
+        expect(p.x).toBeGreaterThanOrEqual(z.x);
+        expect(p.x).toBeLessThanOrEqual(z.x + z.w);
+        expect(p.y).toBeGreaterThanOrEqual(z.y);
+        expect(p.y).toBeLessThanOrEqual(z.y + z.h);
+      }
+      expect(first.x).toBeGreaterThanOrEqual(from.x);
+      expect(first.x).toBeLessThanOrEqual(from.x + from.w);
+      expect(last.y).toBeLessThanOrEqual(to.y + to.h / 2);
+      expect(last.y).toBeGreaterThanOrEqual(to.y);
+      expect(r.label!.x).toBeGreaterThanOrEqual(z.x);
+      expect(r.label!.x + r.label!.w).toBeLessThanOrEqual(z.x + z.w);
+    }
+  });
 });
 
 describe("looksLikeCode", () => {
