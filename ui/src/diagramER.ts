@@ -173,7 +173,6 @@ export async function layoutER(ir: ERIR, elk: Elk): Promise<ERLayout> {
       "elk.algorithm": "layered",
       "elk.direction": ir.direction === "TB" ? "DOWN" : "RIGHT",
       "elk.edgeRouting": "ORTHOGONAL",
-      "elk.json.edgeCoords": "ROOT",
       "elk.padding": "[top=0,left=0,bottom=0,right=0]",
       // Wider than a flow's: a line's two ends carry a mark each, and its
       // middle a role, between tables that are themselves wide.

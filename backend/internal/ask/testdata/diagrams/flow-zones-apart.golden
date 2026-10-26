@@ -1,0 +1,23 @@
+Die Lohnangaben werden an zwei Stellen geprüft: beim Abgleich mit Syrius und durch die Regeln im Lohnformular [1][2].
+
+Das Diagramm zeigt beide Prüfungen nebeneinander [1][2].
+
+```mermaid
+flowchart TB
+  subgraph A["Abgleich mit Syrius"]
+    a1{"Bagatellunfall?"} -->|"Nein"| a2{"Meldung ohne Lohnangaben?"}
+    a1 -->|"Ja"| a3["Leere Lohnangabenliste verlangen"]
+    a2 -->|"Ja"| a4["Ungesetzte Bestandteile; Jahreslohn null"]
+    a2 -->|"Nein"| a5["Währung, Jahresbeträge, Jahresperiode prüfen"]
+    a5 --> a6["Ungesetzte Ferienentschädigung prüfen"]
+  end
+  subgraph B["Regeln im Lohnformular"]
+    b1{"Lohnangaben erforderlich?"} -->|"Obligatorische oder freiwillige Unternehmerversicherung; kein Bagatellunfall"| b2{"Meldung ohne Lohnangaben?"}
+    b1 -->|"Andere Versicherungsart oder Bagatellunfall"| b3["Bereich verbieten und löschen"]
+    b2 -->|"Ja"| b4["Begründung verlangen; Jahreslohn löschen"]
+    b2 -->|"Nein"| b5["Beträge und Perioden prüfen"]
+    b5 --> b6["Jahreslohn verpflichtend berechnen"]
+  end
+```
+
+Beide Stellen verlangen eine Begründung, wenn eine Meldung ohne Lohnangaben eingeht [2].
