@@ -155,18 +155,20 @@
   --shadow-menu: 0 18px 32px rgba(0, 0, 0, 0.38);
 }
 
-/* An answer's diagram has a look of its own, not the chrome's: the dark
-   palette and the IBM Plex pair of the engineering-memo design it was
-   modelled on. Tokens outside @theme, so they make no utilities; the drawing
-   (diagramTheme.ts) reads them and writes them into the SVG resolved, so a
-   downloaded file carries the same colours. */
+/* An answer's diagram has a look of its own, not the chrome's: the IBM Plex
+   pair of the engineering-memo design it was modelled on, on a ground of the
+   chrome's warm greys a step darker than the composer. The memo's cool slate
+   read as the one cold surface on a warm page. The focus is the chrome's
+   accent-strong. Tokens outside @theme, so they make no utilities; the
+   drawing (diagramTheme.ts) reads them and writes them into the SVG
+   resolved, so a downloaded file carries the same colours. */
 :root {
-  --diagram-surface: #192026;
-  --diagram-fg: #e2e8ec;
-  --diagram-muted: #98a5af;
-  --diagram-line: #35414b;
-  --diagram-tint: #1f2830;
-  --diagram-accent: #62b4d0;
+  --diagram-surface: #151514;
+  --diagram-fg: #ece8df;
+  --diagram-muted: #a29e94;
+  --diagram-line: #3b3935;
+  --diagram-tint: #201f1c;
+  --diagram-accent: #d97757;
   --diagram-warn: #e3a33f;
   --diagram-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --diagram-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;

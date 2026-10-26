@@ -3,9 +3,9 @@ import { palette, textWidth, wrap } from "./diagramTheme";
 
 describe("palette", () => {
   it("reads every role off the document, and keeps a var() for a token it lacks", () => {
-    document.documentElement.style.setProperty("--diagram-surface", "#192026");
+    document.documentElement.style.setProperty("--diagram-surface", "#151514");
     const p = palette();
-    expect(p.surface).toBe("#192026");
+    expect(p.surface).toBe("#151514");
     expect(p.warn).toBe("var(--diagram-warn)");
     document.documentElement.style.removeProperty("--diagram-surface");
   });
