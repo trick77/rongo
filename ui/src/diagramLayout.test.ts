@@ -12,6 +12,7 @@ import {
   onCircle,
   onDiamond,
   px,
+  tangles,
   tidy,
   type FlowLayout,
 } from "./diagramLayout";
@@ -397,6 +398,58 @@ describe("layoutElk", () => {
       const p = route(l, from, "d").points;
       expect(p[p.length - 1].y).toBeLessThan(d.y + d.h / 2);
     }
+  });
+
+  // A retry's target sits across the flow between its siblings'; sent
+  // straight on by that, it turned back up across one of them.
+  it("never sends a branch back up straight on", async () => {
+    const down = flow(
+      [n("s"), n("d", "again?", "decision"), n("a"), n("b")],
+      [
+        e("s", "d"),
+        e("d", "a", "go"),
+        e("d", "s", "again"),
+        e("d", "b", "stop"),
+      ],
+    );
+    expect(check(await layoutElk(down, new ELK()))).toEqual([]);
+    const right = flow(
+      [n("s"), n("w"), n("d", "ok?", "decision"), n("a"), n("b")],
+      [
+        e("s", "w"),
+        e("w", "d"),
+        e("d", "a", "yes"),
+        e("d", "w", "retry"),
+        e("d", "b", "no"),
+      ],
+      { direction: "LR" },
+    );
+    expect(check(await layoutElk(right, new ELK()))).toEqual([]);
+  });
+
+  // A box beside the diamond in its layer, its arrow running past the
+  // diamond to a target the diamond shares. The engine tangles this twice
+  // whatever the sides (corners, all straight on, or its own choice); the
+  // order written tangled it three times. The fallback is what is tested:
+  // the corners tangle here, so the drawing comes from comparing both.
+  it("takes the less tangled drawing when the corners tangle", async () => {
+    const ir = flow(
+      [n("s"), n("t"), n("u"), n("d", "which?", "decision")].concat([
+        n("a"),
+        n("b"),
+        n("c"),
+      ]),
+      [
+        e("s", "t"),
+        e("s", "u"),
+        e("t", "d"),
+        e("u", "c"),
+        e("d", "a", "one"),
+        e("d", "b", "two"),
+        e("d", "c", "three"),
+      ],
+    );
+    expect(tangles(await layoutElk(ir, new ELK()))).toBeLessThanOrEqual(2);
   });
 
   it("draws four branches out of one diamond without a crossing", async () => {

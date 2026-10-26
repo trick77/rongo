@@ -320,15 +320,15 @@ export function layoutSpine(ir: FlowIR): FlowLayout | null {
 
   // A node's left side takes the lanes: a diamond has one corner there, a
   // box room for two.
-  const leftUse = new Map<string, number>();
+  const lanesAt = new Map<string, number[]>();
   for (const i of laneEdges) {
     for (const id of [ir.edges[i].from, ir.edges[i].to])
-      leftUse.set(id, (leftUse.get(id) ?? 0) + 1);
+      lanesAt.set(id, [...(lanesAt.get(id) ?? []), i]);
   }
   const byId = new Map(ir.nodes.map((n) => [n.id, n]));
-  for (const [id, k] of leftUse) {
+  for (const [id, lanes] of lanesAt) {
     const one = ["decision", "start", "stop"].includes(byId.get(id)!.shape);
-    if (k > (one ? 1 : 2)) return null;
+    if (lanes.length > (one ? 1 : 2)) return null;
   }
 
   // Sizes: the path's boxes share a width, the outcomes theirs.
@@ -469,15 +469,7 @@ export function layoutSpine(ir: FlowIR): FlowLayout | null {
   // where both run, so the outer one's stub never cuts the inner lane. The
   // inner one taking the top whichever way it ran had a skip down out of a
   // box cross the loop back into it.
-  const meets = new Map<string, { i: number; up: boolean }[]>();
-  for (const s of spans) {
-    const e = ir.edges[s.i];
-    for (const id of [e.from, e.to]) {
-      const list = meets.get(id) ?? [];
-      list.push({ i: s.i, up: rowY.get(id) === s.hi });
-      meets.set(id, list);
-    }
-  }
+  const span = new Map(spans.map((s, k) => [s.i, { ...s, k }]));
   let lx = pathLeft - 32;
   for (const s of spans) {
     const e = ir.edges[s.i];
@@ -485,11 +477,14 @@ export function layoutSpine(ir: FlowIR): FlowLayout | null {
     const b = boxes.get(e.to)!;
     const port = (n: NodeBox) => {
       const mid = rowY.get(n.id)!;
-      const lanes = meets.get(n.id)!;
+      const lanes = lanesAt.get(n.id)!;
       if (n.kind === "decision" || dotted(n.kind) || lanes.length < 2)
         return mid;
-      const [inner, outer] = lanes;
-      const upper = inner.up ? inner : outer;
+      const [inner, outer] = lanes
+        .map((i) => span.get(i)!)
+        .sort((p, q) => p.k - q.k);
+      // Heading up from this box: the box is the lane's lower end.
+      const upper = inner.hi === mid ? inner : outer;
       return mid + (upper.i === s.i ? -8 : 8);
     };
     const leftOf = (n: NodeBox) => n.x;
@@ -974,6 +969,7 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
   const labels = ir.edges.map((e) =>
     e.label !== "" ? labelBox(e.label) : null,
   );
+  const elkRoute = elkRouteFor(ir, labels, tb);
   // Built afresh for each pass: the engine writes its result into the
   // graph it is given.
   const graph = (sides: Map<string, Side> | null): ElkNode => {
@@ -1016,72 +1012,107 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
     };
   };
 
-  let sides: Map<string, Side> | null = null;
-  if (ports.size > 0) {
-    const first = await elk.layout(graph(null));
-    // Across the flow: left to right going down, top to bottom going right.
-    const across = new Map<string, number>();
-    eachPlaced(first, (c, x, y) =>
-      across.set(c.id, tb ? x + (c.width ?? 0) / 2 : y + (c.height ?? 0) / 2),
-    );
-    const entry: Side = tb ? "NORTH" : "WEST";
-    const [before, on, after]: Side[] = tb
-      ? ["WEST", "SOUTH", "EAST"]
-      : ["NORTH", "EAST", "SOUTH"];
-    sides = new Map();
-    for (const [node, list] of ports) {
-      const mid = across.get(node)!;
-      const outs = list
-        .filter((p) => p.out)
-        .sort((p, q) => across.get(p.far)! - across.get(q.far)!);
-      const off = (p: { far: string }) => across.get(p.far)! - mid;
-      // Two branches: the one whose target lies nearer straight on goes
-      // straight on, the other out of the corner facing its target. Three
-      // or more: the outermost two out of the side corners, every other
-      // one straight on, the engine ordering those along the corner.
-      const far =
-        outs.length === 2 && Math.abs(off(outs[0])) > Math.abs(off(outs[1]))
-          ? outs[0]
-          : outs[1];
-      for (const p of list) {
-        if (!p.out) sides.set(p.id, entry);
-        else if (outs.length === 2)
-          sides.set(p.id, p !== far ? on : off(p) < 0 ? before : after);
-        else if (outs.length >= 3 && p === outs[0]) sides.set(p.id, before);
-        else if (outs.length >= 3 && p === outs.at(-1)) sides.set(p.id, after);
-        else sides.set(p.id, on);
+  const entry: Side = tb ? "NORTH" : "WEST";
+  const [before, on, after]: Side[] = tb
+    ? ["WEST", "SOUTH", "EAST"]
+    : ["NORTH", "EAST", "SOUTH"];
+  // Every branch straight on, the engine ordering them along that corner:
+  // all a diamond with one branch needs, and the drawing to fall back on.
+  const straight = new Map<string, Side>();
+  for (const list of ports.values())
+    for (const p of list) straight.set(p.id, p.out ? on : entry);
+
+  const draw = (root: ElkNode): FlowLayout => {
+    // Copies, so a drawing tried and dropped leaves no mark on the next.
+    const placed = new Map<string, NodeBox>();
+    const zones: ZoneBox[] = [];
+    // Where each zone's own coordinates start. The engine returns an edge
+    // relative to its container, the zone holding both its ends: this elkjs
+    // ignores elk.json.edgeCoords, and an edge kept inside one zone was
+    // drawn that zone's offset away, over its neighbour.
+    const origin = new Map<string, Point>([["root", atRoot]]);
+    eachPlaced(root, (c, x, y) => {
+      if (c.id.startsWith("zone:")) {
+        origin.set(c.id, { x, y });
+        const id = c.id.slice(5);
+        const title = ir.zones.find((z) => z.id === id)?.title ?? id;
+        zones.push({
+          id,
+          title,
+          x: px(x),
+          y: px(y),
+          w: px(c.width ?? 0),
+          h: px(c.height ?? 0),
+        });
+        return;
       }
-    }
-  }
-  const root = await elk.layout(graph(sides));
+      placed.set(c.id, { ...boxes.get(c.id)!, x: px(x), y: px(y) });
+    });
+    const routes = (root.edges ?? []).map((e, i) =>
+      elkRoute(e, i, origin, placed),
+    );
+    const nodes = ir.nodes.map((n) => placed.get(n.id)!);
+    widenForTitles(nodes, routes, zones);
+    return frame(nodes, routes, zones);
+  };
 
-  const zones: ZoneBox[] = [];
-  // Where each zone's own coordinates start. The engine returns an edge
-  // relative to its container, the zone holding both its ends: this elkjs
-  // ignores elk.json.edgeCoords, and an edge kept inside one zone was drawn
-  // that zone's offset away, over its neighbour.
-  const origin = new Map<string, Point>([["root", atRoot]]);
-  eachPlaced(root, (c, x, y) => {
-    if (c.id.startsWith("zone:")) {
-      origin.set(c.id, { x, y });
-      const id = c.id.slice(5);
-      const title = ir.zones.find((z) => z.id === id)?.title ?? id;
-      zones.push({
-        id,
-        title,
-        x: px(x),
-        y: px(y),
-        w: px(c.width ?? 0),
-        h: px(c.height ?? 0),
-      });
-      return;
-    }
-    const b = boxes.get(c.id)!;
-    b.x = px(x);
-    b.y = px(y);
+  const branching = [...ports.values()].some(
+    (list) => list.filter((p) => p.out).length >= 2,
+  );
+  if (!branching) return draw(await elk.layout(graph(straight)));
+
+  const first = await elk.layout(graph(null));
+  // Across the flow (left to right going down) and along it.
+  const across = new Map<string, number>();
+  const along = new Map<string, number>();
+  eachPlaced(first, (c, x, y) => {
+    const cx = x + (c.width ?? 0) / 2;
+    const cy = y + (c.height ?? 0) / 2;
+    across.set(c.id, tb ? cx : cy);
+    along.set(c.id, tb ? cy : cx);
   });
+  const corners = new Map<string, Side>();
+  for (const [node, list] of ports) {
+    type P = (typeof list)[number];
+    const off = (p: P) => across.get(p.far)! - across.get(node)!;
+    // The branch whose target lies nearest straight on goes straight on,
+    // the first written on a tie; every other one out of the corner on the
+    // side its target lies. A branch back to an earlier step never goes
+    // straight on: it turned back up across its siblings.
+    let ahead: P | undefined;
+    for (const p of list) {
+      if (!p.out || along.get(p.far)! <= along.get(node)!) continue;
+      if (!ahead || Math.abs(off(p)) < Math.abs(off(ahead))) ahead = p;
+    }
+    for (const p of list)
+      corners.set(
+        p.id,
+        !p.out ? entry : p === ahead ? on : off(p) < 0 ? before : after,
+      );
+  }
+  // The engine places the second pass afresh, so a corner read off the
+  // first can still send a branch across another or behind a box: then the
+  // drawing with every branch straight on is kept, if it tangles less.
+  const drawn = draw(await elk.layout(graph(corners)));
+  const knots = tangles(drawn);
+  if (knots === 0) return drawn;
+  const plain = draw(await elk.layout(graph(straight)));
+  return tangles(plain) < knots ? plain : drawn;
+}
 
-  const routes: EdgeRoute[] = (root.edges ?? []).map((e, i) => {
+/** elkRouteFor reads a flowchart's edges as the engine laid them out, each
+ * end moved onto the diamond or dot it meets. */
+function elkRouteFor(
+  ir: FlowIR,
+  labels: ({ lines: string[]; w: number; h: number } | null)[],
+  tb: boolean,
+) {
+  return (
+    e: ElkExtendedEdge,
+    i: number,
+    origin: Map<string, Point>,
+    boxes: Map<string, NodeBox>,
+  ): EdgeRoute => {
     const ie = ir.edges[i];
     const container = (e as { container?: string }).container;
     const at = origin.get(container ?? "");
@@ -1116,10 +1147,61 @@ export async function layoutElk(ir: FlowIR, elk: Elk): Promise<FlowLayout> {
     const label = elkLabel(e, labels[i], at);
     if (label) route.label = label;
     return route;
+  };
+}
+
+/** tangles counts what a person drawing the chart would have avoided: two
+ * arrows crossing, and an arrow behind a box it does not connect. */
+export function tangles(l: FlowLayout): number {
+  const segs = l.edges.map((e) =>
+    e.points.slice(1).map((p, k): [Point, Point] => [e.points[k], p]),
+  );
+  let n = 0;
+  segs.forEach((s, i) => {
+    for (const t of segs.slice(i + 1))
+      n += s.filter(([a, b]) => t.some(([c, d]) => cut(a, b, c, d))).length;
+    const e = l.edges[i];
+    for (const b of l.nodes) {
+      if (b.id === e.from || b.id === e.to) continue;
+      n += s.filter(([p, q]) => through(p, q, b)).length;
+    }
   });
-  const nodes = ir.nodes.map((n) => boxes.get(n.id)!);
-  widenForTitles(nodes, routes, zones);
-  return frame(nodes, routes, zones);
+  return n;
+}
+
+/** cut says a horizontal and a vertical segment cross inside both: one
+ * meeting the other at an end is not a crossing. */
+export function cut(a: Point, b: Point, c: Point, d: Point): boolean {
+  const h1 = a.y === b.y;
+  if (h1 === (c.y === d.y)) return false;
+  const [h, v] = h1
+    ? [
+        [a, b],
+        [c, d],
+      ]
+    : [
+        [c, d],
+        [a, b],
+      ];
+  const within = (p: number, q: number, r: number) =>
+    p > Math.min(q, r) && p < Math.max(q, r);
+  return within(v[0].x, h[0].x, h[1].x) && within(h[0].y, v[0].y, v[1].y);
+}
+
+/** through says an axis-aligned segment enters a box's inside, a pixel in
+ * from its border. */
+export function through(
+  a: Point,
+  b: Point,
+  r: { x: number; y: number; w: number; h: number },
+): boolean {
+  const x0 = Math.min(a.x, b.x);
+  const x1 = Math.max(a.x, b.x);
+  const y0 = Math.min(a.y, b.y);
+  const y1 = Math.max(a.y, b.y);
+  return (
+    x1 > r.x + 1 && x0 < r.x + r.w - 1 && y1 > r.y + 1 && y0 < r.y + r.h - 1
+  );
 }
 
 /** eachPlaced visits every node the engine placed, zones and what they
@@ -1265,12 +1347,12 @@ export function onCircle(n: NodeBox, end: Point, next: Point): Point {
     const dx = end.x - cx;
     if (Math.abs(dx) >= r) return end;
     const dy = Math.sqrt(r * r - dx * dx);
-    return { x: end.x, y: Math.round(cy + Math.sign(next.y - cy) * dy) };
+    return { x: end.x, y: px(cy + Math.sign(next.y - cy) * dy) };
   }
   const dy = end.y - cy;
   if (Math.abs(dy) >= r) return end;
   const dx = Math.sqrt(r * r - dy * dy);
-  return { x: Math.round(cx + Math.sign(next.x - cx) * dx), y: end.y };
+  return { x: px(cx + Math.sign(next.x - cx) * dx), y: end.y };
 }
 
 /** onDiamond moves an edge's end from the diamond's bounding box onto its

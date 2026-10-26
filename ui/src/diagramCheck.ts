@@ -1,5 +1,5 @@
 import type { FlowLayout, NodeBox, Point } from "./diagramLayout";
-import { dotted, titleRoom } from "./diagramLayout";
+import { cut, dotted, through, titleRoom } from "./diagramLayout";
 import { markRoom, tablePad, type ERLayout } from "./diagramER";
 import {
   boxPad,
@@ -82,7 +82,7 @@ export function check(
     // Rule 5: never behind a box that is not an end.
     for (const n of l.nodes) {
       if (n.id === e.from || n.id === e.to) continue;
-      if (segments(e.points).some(([a, b]) => crosses(a, b, inset(n, 1))))
+      if (segments(e.points).some(([a, b]) => through(a, b, n)))
         out.push(`${name}: passes behind ${n.id}`);
     }
 
@@ -128,7 +128,10 @@ export function check(
   return out;
 }
 
-/** checkER holds an entity model to the flow's connector rules, every text
+/** checkER holds an entity model to the flow's connector rules, no two
+ * relationships crossing included: the engine places the tables free of
+ * any written order, so a crossing it leaves reads as badly as a
+ * flowchart's. Then every text
  * inside its table, and each line's ends straight for long enough to
  * carry their cardinality marks. */
 export function checkER(l: ERLayout): string[] {
@@ -308,15 +311,6 @@ function inset(r: Rect, by: number): Rect {
   return { x: r.x + by, y: r.y + by, w: r.w - 2 * by, h: r.h - 2 * by };
 }
 
-/** crosses says an axis-aligned segment enters the inside of a rect. */
-function crosses(a: Point, b: Point, r: Rect): boolean {
-  const x0 = Math.min(a.x, b.x);
-  const x1 = Math.max(a.x, b.x);
-  const y0 = Math.min(a.y, b.y);
-  const y1 = Math.max(a.y, b.y);
-  return x1 > r.x && x0 < r.x + r.w && y1 > r.y && y0 < r.y + r.h;
-}
-
 function overlaps(a: Rect, b: Rect): boolean {
   return (
     a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
@@ -332,25 +326,6 @@ function distance(r: Rect, a: Point, b: Point): number {
   const dx = Math.max(r.x - x1, x0 - (r.x + r.w), 0);
   const dy = Math.max(r.y - y1, y0 - (r.y + r.h), 0);
   return Math.hypot(dx, dy);
-}
-
-/** cut says a horizontal and a vertical segment cross inside both: one
- * meeting the other at an end is not a crossing. */
-function cut(a: Point, b: Point, c: Point, d: Point): boolean {
-  const h1 = a.y === b.y;
-  if (h1 === (c.y === d.y)) return false;
-  const [h, v] = h1
-    ? [
-        [a, b],
-        [c, d],
-      ]
-    : [
-        [c, d],
-        [a, b],
-      ];
-  const within = (p: number, q: number, r: number) =>
-    p > Math.min(q, r) && p < Math.max(q, r);
-  return within(v[0].x, h[0].x, h[1].x) && within(h[0].y, v[0].y, v[1].y);
 }
 
 /** collinear says two axis-aligned segments share a stretch of one line. */
