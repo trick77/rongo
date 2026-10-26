@@ -771,10 +771,26 @@ func TestLocate_runsAtMostTheCallLimitPerTurn(t *testing.T) {
 	if len(report.Refused) != 4 {
 		t.Errorf("Refused = %v, want the 4 calls over the limit", report.Refused)
 	}
-	// Every call the next request advertises has its result: only the calls
-	// that ran are advertised.
-	if len(told) != locateMaxCalls {
-		t.Errorf("tool results = %d, want one per call that ran", len(told))
+	// Every call the next request advertises has its result. The turn goes
+	// back whole (a signed one on the Messages protocol cannot be trimmed),
+	// so the calls over the limit are answered with a refusal.
+	if len(told) != len(calls) {
+		t.Fatalf("tool results = %d, want one per call the model asked for (%d)", len(told), len(calls))
+	}
+	// In the calls' own order: the ones that ran first, then the refusals,
+	// so a backend pairing results by position pairs each with its call.
+	for i, got := range told {
+		if over := i >= locateMaxCalls; over != strings.HasPrefix(got, locateOverLimit) {
+			t.Errorf("result %d = %q; want the refusal exactly for the calls past the limit", i, got)
+		}
+	}
+	// Rounds remain after the first, so the refusal says the call may come
+	// back; on the last round it promises nothing.
+	if last := told[len(told)-1]; !strings.Contains(last, "again next round") {
+		t.Errorf("refusal with rounds left = %q, want it to say the call may be asked again", last)
+	}
+	if got := locateOverLimitText(false); got != locateOverLimit {
+		t.Errorf("refusal on the last round = %q, want no promise of a later round", got)
 	}
 }
 

@@ -9,8 +9,87 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/trick77/llmwire"
+	"github.com/trick77/llmwire/llmwiretest"
+
+	"github.com/trick77/rongo/internal/llm/llmtest"
 	"github.com/trick77/rongo/internal/usage"
 )
+
+func TestCallTools_replaysTheModelsOwnTurn(t *testing.T) {
+	// Given: a model on the Messages protocol, whose every answer carries a
+	// signed thinking block that has to go back with the next round, as
+	// claude-opus-5-5's does. A turn rebuilt from its text and calls loses
+	// it, and the model re-thinks each round without its earlier reasoning.
+	srv := llmwiretest.NewServer(t)
+	c, err := NewClient(Config{BaseURL: srv.URL, APIKey: "k", Registry: llmtest.Registry(),
+		Answer: llmwiretest.MessagesModel, Gate: llmwiretest.MessagesModel}, srv.Server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs := []ToolMessage{{Role: "user", Content: "Wie wird die Anzahl Haustiere an Ledger uebermittelt?"}}
+	turn, err := c.CallTools(context.Background(), msgs, locateTools())
+	if err != nil {
+		t.Fatalf("CallTools: %v", err)
+	}
+
+	// When: the turn goes back as the model's own.
+	msgs = append(msgs, turn.Assistant(), ToolMessage{Role: "user", Content: "und weiter?"})
+	if _, err := c.CallTools(context.Background(), msgs, locateTools()); err != nil {
+		t.Fatalf("CallTools, round 2: %v", err)
+	}
+
+	// Then: the signed block is on the wire.
+	if !srv.Last().ReplayedThinking() {
+		t.Error("round 2 did not carry the model's signed thinking back")
+	}
+}
+
+func TestToolTurn_assistantIsRebuiltOnceTheCallsChange(t *testing.T) {
+	// Given: a turn with two calls, and the replay items that carry both.
+	calls := []ToolCall{{ID: "a", Name: "grep", Arguments: "{}"}, {ID: "b", Name: "grep", Arguments: "{}"}}
+	turn := ToolTurn{Calls: calls, own: llmwire.Message{Role: llmwire.RoleAssistant,
+		ToolCalls:     []llmwire.ToolCall{{ID: "a", Name: "grep", Arguments: "{}"}, {ID: "b", Name: "grep", Arguments: "{}"}},
+		ResponseItems: []json.RawMessage{json.RawMessage(`{"type":"thinking"}`)}}}
+
+	// Then: the turn as the model sent it carries its replay items.
+	if got := turn.Assistant(); got.replay == nil {
+		t.Error("an unchanged turn lost its replay items")
+	}
+	// The signed blocks name every call they carry: a turn whose calls the
+	// caller trimmed, reordered or replaced goes back rebuilt.
+	for name, changed := range map[string][]ToolCall{
+		"trimmed":   calls[:1],
+		"reordered": {calls[1], calls[0]},
+		"replaced":  {calls[0], {ID: "c", Name: "grep", Arguments: "{}"}},
+		"repaired":  {calls[0], {ID: "b", Name: "grep", Arguments: `{"pattern":"x"}`}},
+	} {
+		turn.Calls = changed
+		if got := turn.Assistant(); got.replay != nil || len(got.Calls) != len(changed) {
+			t.Errorf("%s: turn = %+v, want rebuilt from the calls kept", name, got)
+		}
+	}
+}
+
+func TestWireMessages_aCallingTurnCarriesItsReplayAndItsResults(t *testing.T) {
+	// The locate loop's own shape: the model's calling turn, replayed, then
+	// its results. llmwire gets the calls beside the items they must agree
+	// with, and the results addressed to them.
+	items := []json.RawMessage{json.RawMessage(`{"type":"thinking","thinking":"x","signature":"s"}`),
+		json.RawMessage(`{"type":"tool_use","id":"a","name":"grep","input":{}}`)}
+	turn := ToolTurn{Calls: []ToolCall{{ID: "a", Name: "grep", Arguments: "{}"}},
+		own: llmwire.Message{Role: llmwire.RoleAssistant, ToolCalls: []llmwire.ToolCall{{ID: "a", Name: "grep", Arguments: "{}"}},
+			ResponseItems: items}}
+
+	got := wireMessages([]ToolMessage{{Role: "user", Content: "q"}, turn.Assistant(), ToolResult("a", "hit")})
+
+	if len(got) != 3 || len(got[1].ResponseItems) != 2 || len(got[1].ToolCalls) != 1 || got[1].ToolCalls[0].ID != "a" {
+		t.Fatalf("assistant turn = %+v, want the replay items beside the call", got[1])
+	}
+	if got[2].ToolCallID != "a" {
+		t.Errorf("result answers %q, want a", got[2].ToolCallID)
+	}
+}
 
 // The tools here are the ones the locate loop actually gives the model, and
 // the arguments are terms from the question that motivated it ("wie wird die
