@@ -817,6 +817,35 @@ describe("App, the header's thread menu", () => {
     expect(within(banner).queryByRole("menu")).toBeNull();
   });
 
+  // The menu hangs out of the header into the thread view, whose head fade
+  // comes later in the tree: at a tie the fade paints over the menu's top
+  // rows and the menu reads in two greys.
+  it("out-ranks the thread view's head fade", async () => {
+    atPath("/thread/" + addr);
+    apiFetch(oneThread, oneTurn);
+    const user = userEvent.setup();
+    const { container } = render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    await screen.findByText(/Through a job/);
+    const banner = screen.getByRole("banner");
+    await user.click(
+      within(banner).getByRole("button", {
+        name: "Actions for How does shipping work?",
+      }),
+    );
+    const menu = within(banner).getByRole("menu", { name: "Thread actions" });
+    const fade = container.querySelector(
+      ".sticky.bg-gradient-to-b",
+    ) as HTMLElement;
+    const z = (el: HTMLElement) =>
+      Number(/\bz-(\d+)\b/.exec(el.className)?.[1]);
+    expect(z(fade)).toBeGreaterThan(0);
+    expect(z(menu)).toBeGreaterThan(z(fade));
+  });
+
   // Star from a rail row, then open the header menu: it must read Unstar,
   // which it can only do if the rail's change reached the shell.
   it("follows a star put on from the rail", async () => {

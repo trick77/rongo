@@ -100,7 +100,10 @@ export default function ThreadMenu({
       role="menu"
       aria-label="Thread actions"
       className={
-        "absolute z-20 w-[168px] overflow-hidden rounded-ui border border-elevated-border " +
+        // z-30, the busybar's reason: the header's menu hangs into the
+        // thread view, whose head fade is z-20 and later in the tree; at a
+        // tie the fade dimmed the menu's top rows.
+        "absolute z-30 w-[168px] overflow-hidden rounded-ui border border-elevated-border " +
         "bg-elevated py-1 shadow-menu " +
         className +
         " " +
