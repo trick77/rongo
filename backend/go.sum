@@ -12,10 +12,10 @@ github.com/tetratelabs/wazero v1.9.0 h1:IcZ56OuxrtaEz8UYNRHBrUa9bYeX9oVY93KspZZB
 github.com/tetratelabs/wazero v1.9.0/go.mod h1:TSbcXCfFP0L2FGkRPxHphadXPjo1T6W+CseNNY7EkjM=
 github.com/trick77/llmwire v0.1.9-0.20261026072811-61ed84c8533a h1:Ss35HipsBL8fLMvjdWX8m4M7MpaN7TPCQFgq2Utmj44=
 github.com/trick77/llmwire v0.1.9-0.20261026072811-61ed84c8533a/go.mod h1:4GwRISjt42acrXskW+MK3Y+STJSs/DenHe4OJSVOYI4=
-github.com/trick77/ship/kit v0.17.4 h1:p9fEZu+n99b94zYNUufAWegWsJoCNqlDHQhoqcSpXnA=
-github.com/trick77/ship/kit v0.17.4/go.mod h1:cE+kQhN2nb5j2ML174YKdGrC41M2GxnILzQLqFupsHE=
-github.com/trick77/ship/kit/auth v0.3.1 h1:P1x06hTYWnBs84RIVxeiU6UuDj8R2TOGTEsNO1nTylA=
-github.com/trick77/ship/kit/auth v0.3.1/go.mod h1:HaCfFgEvLpWdzDX+K9WbTCGY1FEucjSiZUXBze+8mvY=
+github.com/trick77/ship/kit v0.18.0 h1:lrn7wvL+/ErzgHRIs0FoQSnA1hfN2/6zt3+k08O6Z/0=
+github.com/trick77/ship/kit v0.18.0/go.mod h1:cE+kQhN2nb5j2ML174YKdGrC41M2GxnILzQLqFupsHE=
+github.com/trick77/ship/kit/auth v0.3.2 h1:+2l6JpPAgm4v7i9nBJJ9MJgaBMGUQRCRJ+pWz8wroY8=
+github.com/trick77/ship/kit/auth v0.3.2/go.mod h1:powkZwDXqRJ+sRNlzOJTlHVw3DiMKNIHXhB4pt2iK4I=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=
 go.yaml.in/yaml/v3 v3.0.5/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=
 golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
