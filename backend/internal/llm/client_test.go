@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/trick77/llmwire"
-	"github.com/trick77/llmwire/llmwiretest"
+	"github.com/trick77/toolkit/llmwire"
+	"github.com/trick77/toolkit/llmwire/llmwiretest"
 
 	"github.com/trick77/rongo/internal/llm/llmtest"
 	"github.com/trick77/rongo/internal/usage"

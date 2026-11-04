@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trick77/llmwire"
-	"github.com/trick77/llmwire/llmwiretest"
+	"github.com/trick77/toolkit/llmwire"
+	"github.com/trick77/toolkit/llmwire/llmwiretest"
 
 	"github.com/trick77/rongo/internal/config"
 	"github.com/trick77/rongo/internal/embed"

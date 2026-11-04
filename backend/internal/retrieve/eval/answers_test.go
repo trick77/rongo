@@ -35,7 +35,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/trick77/llmwire"
+	"github.com/trick77/toolkit/llmwire"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/embed"

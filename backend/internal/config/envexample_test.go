@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trick77/llmwire"
+	"github.com/trick77/toolkit/llmwire"
 )
 
 // activeEnvExampleVars returns the BACKEND_* names that .env.example leaves

@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/trick77/llmwire"
 	"github.com/trick77/rongo/internal/usage"
+	"github.com/trick77/toolkit/llmwire"
 )
 
 func TestEmbed_recordsPromptTokensIntoTheContextsMeter(t *testing.T) {

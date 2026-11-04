@@ -1,7 +1,7 @@
 // Package llm talks to rongo's two model lanes over an OpenAI-compatible
 // chat completions endpoint.
 //
-// The wire is github.com/trick77/llmwire: it renders the request the way each
+// The wire is github.com/trick77/toolkit/llmwire: it renders the request the way each
 // deployment wants it, reads the stream, decodes usage, redacts the key out of
 // error bodies and bounds the call by named timeouts. What stays here is what
 // rongo means by a call — two lanes, an answer cap on every request, the
@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/trick77/llmwire"
+	"github.com/trick77/toolkit/llmwire"
 
 	"github.com/trick77/rongo/internal/config"
 	"github.com/trick77/rongo/internal/usage"

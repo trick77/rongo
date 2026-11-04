@@ -12,7 +12,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/trick77/llmwire/llmwiretest"
+	"github.com/trick77/toolkit/llmwire/llmwiretest"
 
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/llm/llmtest"

@@ -3,7 +3,7 @@ package llm
 import (
 	"encoding/json"
 
-	"github.com/trick77/llmwire"
+	"github.com/trick77/toolkit/llmwire"
 )
 
 // DecodeReply reads the JSON object a gate reply carries into v: the object
