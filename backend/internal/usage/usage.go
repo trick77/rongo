@@ -11,7 +11,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/trick77/llmwire"
+	"github.com/trick77/toolkit/llmwire"
 )
 
 // Call is one paid request, as the upstream reported it.

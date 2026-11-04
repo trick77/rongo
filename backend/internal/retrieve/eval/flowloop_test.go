@@ -39,8 +39,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/trick77/llmwire"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/toolkit/llmwire"
 )
 
 // flowToolBudget is how many ROUNDS one question gets, not how many tool calls:

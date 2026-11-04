@@ -2,7 +2,7 @@
 // /embeddings endpoint, and caches the result by content hash so unchanged
 // code is never embedded twice.
 //
-// The wire is github.com/trick77/llmwire: it batches the inputs, posts,
+// The wire is github.com/trick77/toolkit/llmwire: it batches the inputs, posts,
 // checks that every input got exactly one vector at its own index, redacts
 // the key out of error bodies and bounds the call. What stays here is what
 // rongo adds — the vector width the database was built with, the usage
@@ -17,7 +17,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/trick77/llmwire"
+	"github.com/trick77/toolkit/llmwire"
 
 	"github.com/trick77/rongo/internal/sched"
 	"github.com/trick77/rongo/internal/usage"

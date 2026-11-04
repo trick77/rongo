@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/trick77/llmwire/llmwiretest"
+	"github.com/trick77/toolkit/llmwire/llmwiretest"
 
 	"github.com/trick77/rongo/internal/llm"
 )

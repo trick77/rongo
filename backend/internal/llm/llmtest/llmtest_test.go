@@ -3,7 +3,7 @@ package llmtest
 import (
 	"testing"
 
-	"github.com/trick77/llmwire"
+	"github.com/trick77/toolkit/llmwire"
 )
 
 func TestRegistry_gateIsTheChatProfileOnItsOwnProvider(t *testing.T) {

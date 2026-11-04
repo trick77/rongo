@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/trick77/llmwire"
-	"github.com/trick77/llmwire/llmwiretest"
+	"github.com/trick77/toolkit/llmwire"
+	"github.com/trick77/toolkit/llmwire/llmwiretest"
 	"go.yaml.in/yaml/v3"
 )
 
