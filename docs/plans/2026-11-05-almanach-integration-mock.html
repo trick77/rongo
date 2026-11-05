@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rongo + Almanach — integration mock</title>
+<style>
+  @font-face { font-family: "Anthropic Sans"; src: url("../../ui/src/fonts/SansWebVariable-TextRegular.woff2") format("woff2"); font-weight: 300 800; font-display: swap; }
+  @font-face { font-family: "Anthropic Serif"; src: url("../../ui/src/fonts/SerifWebVariable-TextRegular.woff2") format("woff2"); font-weight: 300 800; font-display: swap; }
+  @font-face { font-family: "Anthropic Serif"; src: url("../../ui/src/fonts/SerifWebVariable-TextRegularItalic.woff2") format("woff2"); font-weight: 300 800; font-style: italic; font-display: swap; }
+  @font-face { font-family: "Anthropic Mono"; src: url("../../ui/src/fonts/MonoVariableVariable-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+
+  :root {
+    /* peeq / loom / rongo / almanach tokens, verbatim */
+    --bg: #1f1f1e; --panel: #1b1b1a; --active: #2c2c2a; --border: #323230; --border-soft: #2a2a28;
+    --ink: #faf9f5; --ink-dim: #e4e1d8; --ink-prose: #f3f0e8; --muted: #9c9a92; --faint: #6f6d66;
+    --accent: #c6613f; --accent-strong: #d97757; --accent-fill: #c25f34; --accent-dim: #5a3527;
+    --online: #5aa06a; --danger: #c14638; --danger-ink: #ec7e7e; --kept: #d6a15a;
+    --elevated: #363632; --elevated-border: #454540;
+    --shadow-panel: 0 24px 60px -18px rgba(0,0,0,.6);
+    --sans: "Anthropic Sans", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --serif: "Anthropic Serif", Georgia, "Times New Roman", serif;
+    --mono: "Anthropic Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --r: 10px; --r-sm: 8px; --r-lg: 12px;
+    --rail: 248px; --evw: 320px; --crail: 196px;
+    /* ochre = "your move" */
+    --wait: var(--kept); --wait-wash: rgba(214,161,90,.14);
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; }
+  body { background: #141413; color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  a { color: inherit; }
+  code, .mono { font-family: var(--mono); font-size: .9em; }
+  [hidden] { display: none !important; }
+  template { display: none; }
+
+  /* ================= mockbar + stage ================= */
+  .mockbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; height: 44px; display: flex; gap: 18px; align-items: center; padding: 0 18px; background: #0f0f0e; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+  .mockbar .grp { display: inline-flex; gap: 2px; border: 1px solid var(--border); border-radius: 999px; padding: 2px; background: var(--panel); flex: none; }
+  .mockbar .grp button { padding: 4px 12px; border-radius: 999px; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  .mockbar .hint { white-space: normal; line-height: 1.25; font-size: 11.5px; min-width: 0; }
+  .mockbar .grp button[aria-pressed="true"] { background: var(--accent-fill); color: var(--ink); }
+  .mockbar .lbl { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); margin-right: 6px; }
+  .mockbar .hint { margin-left: auto; color: var(--faint); }
+  #stage { padding-bottom: 48px; }
+  #stage[data-mode="compare"] { padding: 24px 24px 72px; display: grid; gap: 28px; }
+  .frame { border: 1px solid var(--elevated-border); border-radius: 12px; overflow: hidden; background: var(--bg); box-shadow: var(--shadow-panel); }
+  .frame .ftitle { padding: 8px 14px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); background: #0f0f0e; border-bottom: 1px solid var(--border); display: flex; gap: 10px; }
+  .frame .ftitle b { color: var(--kept); font-weight: 500; }
+  .frame .app { height: 880px; }
+  #stage:not([data-mode="compare"]) .frame { border: 0; border-radius: 0; box-shadow: none; }
+  #stage:not([data-mode="compare"]) .frame .ftitle { display: none; }
+  #stage:not([data-mode="compare"]) .frame .app { height: calc(100vh - 44px); }
+
+  /* ================= app shell ================= */
+  .app { display: grid; grid-template-rows: 56px 1fr; background: var(--bg); color: var(--ink); min-height: 0; }
+  .bar { display: grid; grid-template-columns: var(--rail) 1fr auto; align-items: center; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .app[data-shell="b"] .bar { grid-template-columns: auto 1fr auto; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 20px; font-family: var(--serif); font-weight: 500; font-size: 21px; letter-spacing: -.01em; height: 100%; color: #f4f0e8; white-space: nowrap; }
+  .brand small { font-family: var(--mono); color: var(--faint); font-weight: 400; font-size: 11px; margin-left: auto; }
+  .app[data-shell="b"] .brand small { margin-left: 6px; }
+  .crumb { display: flex; align-items: center; gap: 10px; padding: 0 24px; font-size: 15px; color: var(--muted); min-width: 0; }
+  .crumb b { color: var(--accent-strong); font-weight: 500; font-family: var(--serif); font-size: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crumb .sep { color: var(--faint); }
+  .app[data-shell="b"] .crumb { display: none; }
+  .topnav { display: none; align-items: center; gap: 2px; padding: 0 8px; }
+  .app[data-shell="b"] .topnav { display: flex; }
+  .topnav button { padding: 6px 12px; border-radius: var(--r-sm); color: var(--muted); font-size: 14px; }
+  .topnav button:hover { color: var(--ink); background: var(--active); }
+  .topnav button[aria-current="page"] { color: var(--ink); background: var(--active); }
+  .topnav .cnt, .nav .cnt { margin-left: 6px; border-radius: 999px; background: var(--accent-dim); color: var(--ink); font-size: 11.5px; padding: 0 6px; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; background: var(--panel); line-height: 1.5; }
+  .pill.accent { border-color: var(--accent-dim); background: var(--accent-dim); color: var(--accent-strong); font-weight: 500; }
+  .pill.ochre { border-color: transparent; background: var(--wait-wash); color: var(--wait); font-weight: 500; }
+  .pill.dim { border-color: transparent; background: var(--active); color: var(--muted); }
+  .pill.ok { border-color: transparent; background: rgba(90,160,106,.16); color: var(--online); font-weight: 500; }
+  .pill.fail { border-color: transparent; background: rgba(193,70,56,.16); color: var(--danger-ink); font-weight: 500; }
+  .pill.quiet { border-color: var(--border); background: transparent; color: var(--faint); }
+  .pill.kind { border-color: transparent; background: var(--active); color: var(--ink-dim); font-family: var(--mono); font-size: 10.5px; letter-spacing: .02em; }
+  .pill i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 6px; vertical-align: 1px; }
+  .user { display: flex; align-items: center; gap: 14px; padding: 0 20px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .user button:hover { color: var(--ink); }
+
+  .body { display: grid; grid-template-columns: var(--rail) 1fr; min-height: 0; }
+  .app[data-shell="b"]:not([data-page="ask"]) .body { grid-template-columns: 1fr; }
+  .app[data-shell="b"]:not([data-page="ask"]) .rail { display: none; }
+  .rail { border-right: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .nav { padding: 12px 12px 4px; display: grid; gap: 2px; }
+  .app[data-shell="b"] .nav, .app[data-shell="b"] .lbl.explore { display: none; }
+  .nav button { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: var(--r-sm); color: var(--muted); font-size: 15px; text-align: left; position: relative; }
+  .nav button:hover { color: var(--ink); background: var(--active); }
+  .nav button[aria-current="page"] { color: var(--ink); background: var(--active); }
+  .nav button[aria-current="page"]::before { content: ""; position: absolute; left: -12px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+  .nav svg { width: 16px; height: 16px; color: var(--muted); flex: none; }
+  .lbl { padding: 14px 24px 4px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); display: flex; font-weight: 500; }
+  .lbl .n { margin-left: auto; letter-spacing: 0; font-family: var(--mono); }
+  .threads { flex: 1; overflow: auto; padding: 0 12px 12px; }
+  .threads button { display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; padding: 7px 12px; border-radius: var(--r-sm); color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; }
+  .threads button > .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .threads button > time { margin-left: auto; flex: none; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .threads button:hover, .threads button[aria-current="true"] { color: var(--ink); background: var(--active); }
+  .threads .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-strong); animation: pulse 1.2s ease-in-out infinite; flex: none; align-self: center; }
+  .threadwrap { display: contents; }
+  .app:not([data-page="ask"]) .threadwrap { display: none; }
+  .app[data-page="ask"] .crail-slot { display: none; }
+  .crail-slot { flex: 1; overflow: auto; padding: 4px 12px 12px; }
+  .railfoot { margin: 0 12px 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r); background: var(--bg); font-size: 13px; color: var(--muted); display: grid; gap: 6px; }
+  .railfoot div { display: flex; gap: 8px; align-items: center; }
+  .railfoot i { width: 7px; height: 7px; border-radius: 50%; background: var(--online); flex: none; }
+  .railfoot i.wait { background: var(--wait); }
+
+  /* content rail (Almanach's Inhalt), shared markup in both shells */
+  .crail { font-size: 13.5px; }
+  .crail .search { position: relative; margin: 10px 0 6px; }
+  .crail .search input { width: 100%; height: 34px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--panel); color: var(--ink); padding: 0 32px 0 10px; font: inherit; font-size: 13.5px; }
+  .crail .search kbd { position: absolute; right: 8px; top: 8px; border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .crail .grp { padding: 10px 0 2px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+  .crail a { display: flex; align-items: baseline; gap: 8px; padding: 4px 10px; border-left: 2px solid transparent; color: var(--muted); text-decoration: none; }
+  .crail a:hover { color: var(--ink); }
+  .crail a[aria-current="true"] { color: var(--ink); border-left-color: var(--accent); }
+  .crail a .n { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .crail .head { display: flex; align-items: center; gap: 6px; padding: 10px 10px 4px; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  .crail .head b { color: var(--ink); font-weight: 500; }
+  .crail .head .nav2 { margin-left: auto; font-family: var(--mono); color: var(--faint); letter-spacing: .1em; }
+
+  /* ================= main / pages ================= */
+  main { min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+  section[data-view] { display: contents; }
+  .scroll { flex: 1; overflow: auto; min-height: 0; }
+  .page { padding: 28px 40px 60px; max-width: 1180px; }
+  .app[data-shell="b"]:not([data-page="ask"]) .page { display: grid; grid-template-columns: var(--crail) minmax(0,1fr); gap: 0 44px; max-width: 1400px; margin: 0 auto; }
+  .crail-b { display: none; }
+  .app[data-shell="b"]:not([data-page="ask"]) .crail-b { display: block; position: sticky; top: 0; align-self: start; padding-top: 44px; }
+  .app[data-shell="b"] .page > .col { min-width: 0; }
+  .page h2 { margin: 0 0 4px; font-family: var(--serif); font-size: 28px; font-weight: 500; letter-spacing: -.01em; }
+  .page .lede { color: var(--muted); margin: 0 0 22px; font-size: 14.5px; max-width: 70ch; }
+  .crumbs { font-size: 13px; color: var(--faint); margin: 0 0 10px; display: flex; gap: 8px; }
+  .crumbs a { color: var(--muted); text-decoration: none; }
+  .crumbs a:hover { color: var(--ink); }
+  .head { display: flex; align-items: flex-start; gap: 20px; }
+  .head .grow { flex: 1; min-width: 0; }
+  .metaline { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 13.5px; color: var(--muted); margin: 4px 0 0; }
+  .metaline .sep { color: var(--faint); }
+  .metaline .ix { color: var(--ink-dim); }
+  .acts { display: flex; gap: 8px; align-items: center; flex: none; }
+  .btn { font-size: 13.5px; padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px; color: var(--ink-dim); background: var(--panel); white-space: nowrap; }
+  .btn:hover { background: var(--active); border-color: var(--elevated-border); }
+  .btn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--ink); }
+  .btn.primary:hover { background: var(--accent-strong); }
+  .btn.small { font-size: 12.5px; padding: 4px 10px; }
+  .btn.danger { color: var(--danger-ink); }
+  .btn kbd { font-family: var(--mono); color: var(--faint); margin-left: 6px; font-size: 11px; }
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 18px 0 22px; }
+  .tabs button { padding: 7px 12px; font-size: 14px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+  .tabs button .n { color: var(--faint); font-family: var(--mono); font-size: 11.5px; margin-left: 6px; }
+  .eyebrow { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+  h3.sec { margin: 30px 0 10px; font-family: var(--serif); font-size: 21px; font-weight: 500; letter-spacing: -.01em; display: flex; align-items: baseline; gap: 10px; }
+  h3.sec small { font-family: var(--sans); font-size: 12.5px; color: var(--faint); font-weight: 400; }
+  h3.sec .push { margin-left: auto; display: flex; gap: 6px; }
+  .icobtn { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); background: var(--panel); }
+  .icobtn svg { width: 14px; height: 14px; }
+
+  .strip { display: flex; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); margin: 18px 0 8px; overflow: hidden; }
+  .strip div { padding: 12px 18px; border-right: 1px solid var(--border); flex: 1; white-space: nowrap; }
+  .strip div:last-child { border-right: 0; }
+  .strip .k { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+  .strip .v { font-family: var(--serif); font-size: 24px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .strip .v small { font-family: var(--sans); font-size: 12.5px; color: var(--muted); margin-left: 6px; }
+  .strip div.rongo .k::after, .tile.rongo .k::after { content: "rongo"; margin-left: 6px; font-family: var(--mono); letter-spacing: 0; text-transform: none; color: var(--accent-strong); }
+
+  table.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); overflow: hidden; }
+  table.tbl th { text-align: left; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; padding: 9px 14px; border-bottom: 1px solid var(--border); background: var(--bg); white-space: nowrap; }
+  table.tbl th.rongo::after { content: "rongo"; margin-left: 6px; font-family: var(--mono); letter-spacing: 0; text-transform: none; color: var(--accent-strong); }
+  table.tbl td { padding: 11px 14px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  table.tbl tr:last-child td { border-bottom: 0; }
+  table.tbl tr.row:hover td { background: var(--active); cursor: pointer; }
+  table.tbl .num, table.tbl th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); }
+  .name { font-family: var(--mono); font-weight: 500; font-size: 13px; }
+  .sub { color: var(--faint); font-size: 12px; margin-top: 3px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .teaser { color: var(--muted); font-size: 13px; max-width: 42ch; line-height: 1.45; }
+  .sha { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); }
+  .when { color: var(--faint); font-size: 12px; margin-left: 6px; }
+  .errline { margin-top: 4px; color: var(--accent-strong); font-size: 12.5px; }
+  tr[data-state="error"] td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+  tr[data-state="off"] td { color: var(--faint); }
+  .stack { display: grid; gap: 4px; }
+  .stack .btn { text-align: center; }
+
+  /* callouts: open decisions */
+  .callout { margin: 26px 0 0; border: 1px solid var(--border); border-left: 3px solid var(--wait); border-radius: 8px; background: var(--panel); padding: 12px 16px; font-size: 13px; color: var(--ink-dim); max-width: 78ch; line-height: 1.5; }
+  .callout b { color: var(--ink); font-weight: 600; }
+  .callout .tag { display: inline-block; font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--wait); font-weight: 600; margin-right: 8px; }
+  .callout p { margin: 4px 0 0; }
+
+  /* ================= ask ================= */
+  .ask { display: grid; grid-template-columns: 1fr var(--evw); min-height: 0; flex: 1; }
+  .col { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
+  .thread { padding: 32px 40px 40px; max-width: 900px; }
+  .turn { padding: 0 0 32px; margin-bottom: 32px; border-bottom: 1px solid var(--border-soft); }
+  .turn:last-of-type { border-bottom: 0; }
+  .q { margin: 0; font-family: var(--serif); font-size: 26px; font-weight: 500; letter-spacing: -.01em; line-height: 1.3; color: var(--ink); max-width: 30ch; text-wrap: balance; }
+  .eyebrow.role { color: var(--accent-strong); margin-bottom: 6px; }
+  .meta { display: flex; gap: 6px; align-items: center; margin: 10px 0 0 0; }
+  .meta time { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+  .chev { width: 11px; height: 11px; transition: transform .15s; flex: none; }
+  [aria-expanded="true"] > .chev { transform: rotate(90deg); }
+  .prog { margin: 16px 0 0 0; }
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 22px 1fr auto; column-gap: 12px; font-size: 14px; color: var(--muted); position: relative; }
+  .steps::before { content: ""; position: absolute; left: 10px; top: 14px; bottom: 14px; width: 1px; background: var(--border); }
+  .steps li { display: contents; }
+  .steps li > i { position: relative; width: 22px; height: 28px; display: flex; align-items: center; justify-content: center; }
+  .steps li > i::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); position: relative; z-index: 1; box-shadow: 0 0 0 3px var(--bg); }
+  .steps li > span { line-height: 28px; }
+  .steps li > span .wiki { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-left: 8px; border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
+  .steps li > time { line-height: 28px; font-family: var(--mono); font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; text-align: right; }
+  .steps li.done > i::before { background: var(--online); }
+  .steps li.end > span { color: var(--ink); font-weight: 500; }
+  .steps li.end > i::before { width: 12px; height: 12px; }
+  .steps li.wait > i::before { background: var(--wait); box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--wait-wash); }
+  .steps li.wait > span { color: var(--wait); }
+  .steps li.decided > i::before { background: var(--muted); }
+  .steps li.decided > span { color: var(--muted); font-weight: 400; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 4px var(--accent-dim); } }
+  @media (prefers-reduced-motion: reduce) { .threads .pulse, .caret { animation: none; } }
+
+  .clar { margin: 12px 0 0 0; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); }
+  .clar.open { border-color: var(--wait); }
+  .clar > button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 14px; text-align: left; font-size: 14.5px; }
+  .clar.open > button { color: var(--wait); font-weight: 500; }
+  .clar .lab { font-size: 11px; color: var(--faint); letter-spacing: .1em; text-transform: uppercase; font-weight: 500; }
+  .clar .sub2 { margin-left: auto; font-size: 12.5px; color: var(--faint); }
+  .cands { border-top: 1px solid var(--border-soft); }
+  .cand { display: grid; gap: 3px; width: 100%; text-align: left; padding: 12px 16px 12px 14px; border-left: 3px solid var(--accent-dim); border-bottom: 1px solid var(--border-soft); }
+  .cand:last-child { border-bottom: 0; }
+  .cand:hover { background: var(--active); }
+  .cand .l1 { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .cand .l1 .proj { font-family: var(--mono); color: var(--wait); font-weight: 500; }
+  .cand .l1 .reps { color: var(--faint); font-family: var(--mono); font-size: 11.5px; }
+  .cand .l1 .hair { flex: 1; height: 1px; background: var(--border-soft); }
+  .cand .l2 { color: var(--ink); font-size: 14.5px; }
+  .cand .l3 { color: var(--muted); font-size: 13px; line-height: 1.45; max-width: 60ch; }
+  .cand .l3 .tagsrc { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-left: 6px; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+  .cand.all { border-left-color: transparent; border-top: 1px solid var(--border); }
+
+  .ans { margin: 20px 0 0 0; max-width: 68ch; font-size: 16px; line-height: 1.65; color: var(--ink-prose); font-family: var(--serif); }
+  .ans p { margin: 0 0 14px; }
+  .ans code { background: var(--active); border: 1px solid var(--border); padding: 0 5px; border-radius: 5px; font-size: .85em; font-family: var(--mono); }
+  .ans sup { font-family: var(--mono); font-size: 10px; font-weight: 600; margin: 0 1px; }
+  .ans sup a { color: var(--accent-strong); text-decoration: none; padding: 1px 4px; border-radius: 4px; background: var(--accent-dim); }
+  .ans sup a.wiki { color: var(--kept); background: var(--wait-wash); }
+  .facts { display: flex; gap: 8px; margin: 18px 0 0 0; align-items: center; flex-wrap: wrap; }
+  .facts .pill { margin-left: auto; }
+
+  /* sources pane */
+  .ev { border-left: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .ev header { padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); display: flex; align-items: center; font-weight: 500; }
+  .ev header .n { margin-left: auto; letter-spacing: 0; font-family: var(--mono); }
+  .ev .list { overflow: auto; flex: 1; }
+  .src { display: grid; grid-template-columns: 26px 1fr; gap: 2px 8px; padding: 14px 18px; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+  .src:hover, .src.hot { background: var(--active); }
+  .src .m { color: var(--accent-strong); font-weight: 600; font-family: var(--mono); grid-row: 1 / span 6; }
+  .src .repo { color: var(--ink); font-weight: 500; }
+  .src .repo span { color: var(--faint); font-weight: 400; margin-left: 6px; font-family: var(--mono); font-size: 11.5px; }
+  .src .path { color: var(--muted); word-break: break-all; font-family: var(--mono); font-size: 12px; }
+  .src .path b { color: var(--ink-dim); font-weight: 500; }
+  .src .path:hover b { text-decoration: underline; }
+  .src.wiki { border-left: 2px solid var(--faint); padding-left: 16px; }
+  .src.wiki .m { color: var(--kept); }
+  .src.wiki .eyebrow { color: var(--kept); }
+  .src.wiki .sname { color: var(--ink); font-size: 13.5px; }
+  .src.wiki .files { color: var(--faint); font-family: var(--mono); font-size: 11.5px; }
+  .src.wiki .prs { display: flex; gap: 4px; margin-top: 4px; }
+  .prchip { font-family: var(--mono); font-size: 10.5px; color: var(--ink-dim); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; background: var(--bg); text-decoration: none; }
+  .prchip:hover { border-color: var(--elevated-border); color: var(--ink); }
+  .prchip.quiet { color: var(--faint); }
+  .ev .note { padding: 14px 18px; font-size: 12.5px; color: var(--faint); border-top: 1px solid var(--border); line-height: 1.45; }
+  .ev .note b { color: var(--muted); font-weight: 500; }
+
+  /* composer */
+  .dock { padding: 12px 40px 18px; background: linear-gradient(to bottom, transparent, var(--bg) 30%); }
+  .pastes { display: flex; gap: 6px; margin: 0 0 8px; }
+  .paste { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); padding: 3px 8px 3px 10px; font-size: 12.5px; color: var(--muted); max-width: 520px; }
+  .paste .eyebrow { color: var(--kept); font-size: 10px; white-space: nowrap; }
+  .paste .t { color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-style: italic; font-family: var(--serif); font-size: 13px; }
+  .paste .x { color: var(--faint); }
+  .prompt { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel); padding: 8px 8px 8px 12px; box-shadow: var(--shadow-panel); }
+  .ctl { display: flex; align-items: center; gap: 8px; }
+  .rolepill { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); padding: 2px; gap: 2px; }
+  .rolepill button { font-size: 12.5px; font-weight: 500; padding: 4px 12px; color: var(--muted); border-radius: 999px; }
+  .rolepill button[aria-pressed="true"] { background: var(--accent-fill); color: var(--ink); }
+  .scope { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); height: 32px; padding: 0 12px; font-size: 12.5px; color: var(--muted); }
+  .scope b { color: var(--ink-dim); font-weight: 500; font-family: var(--mono); font-size: 12px; }
+  .prompt textarea { border: 0; background: transparent; resize: none; font: inherit; font-size: 15px; color: var(--ink); outline: none; padding: 6px 0; width: 100%; }
+  .prompt textarea::placeholder { color: var(--faint); opacity: 1; }
+  .go { font-size: 14px; font-weight: 500; padding: 9px 18px; background: var(--accent-fill); color: var(--ink); border-radius: 999px; }
+  .dockhint { margin-top: 8px; font-size: 12px; color: var(--faint); padding-left: 4px; }
+
+  /* ================= wiki: maps ================= */
+  .map { border: 1px solid var(--border); border-radius: var(--r); background: #151514; padding: 14px 18px 10px; position: relative; }
+  .map .tools { position: absolute; right: 10px; top: 10px; display: flex; gap: 6px; }
+  .band { display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: baseline; padding: 8px 0; border-top: 1px dashed #2a2a28; }
+  .band:first-of-type { border-top: 0; }
+  .band .z { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: #6f6d66; font-weight: 500; }
+  .band .names { color: #a29e94; font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 18px; font-family: "IBM Plex Sans", var(--sans); }
+  .band .names span { padding: 1px 0; border-bottom: 1px solid transparent; cursor: default; }
+  .band .names span.lit { color: #ece8df; border-bottom-color: var(--accent-strong); }
+  .band .boxes { display: flex; flex-wrap: wrap; gap: 10px; }
+  .box { border: 1px solid #3b3935; border-radius: 6px; background: #201f1c; padding: 8px 11px; min-width: 190px; max-width: 240px; cursor: pointer; }
+  .box .nn { font-family: var(--mono); font-size: 12.5px; color: #ece8df; font-weight: 500; }
+  .box .nd { color: #a29e94; font-size: 11.5px; margin-top: 3px; line-height: 1.4; }
+  .box.focus { border-color: var(--accent-strong); box-shadow: 0 0 0 1px var(--accent-strong); }
+  .box.lit { border-color: #d97757; }
+  .box.shared { border-style: dashed; }
+  .map .conn { margin-top: 8px; padding-top: 8px; border-top: 1px solid #2a2a28; font-size: 12.5px; color: #a29e94; font-family: "IBM Plex Sans", var(--sans); }
+  .map .conn b { color: #ece8df; font-weight: 500; font-family: var(--mono); font-size: 12px; }
+  .map .conn .w { color: var(--accent-strong); font-family: var(--mono); margin: 0 4px; }
+  .map.dim .box:not(.lit):not(.focus), .map.dim .names span:not(.lit) { opacity: .45; }
+
+  /* ================= wiki: description ================= */
+  .prose { font-family: var(--serif); font-size: 15.5px; line-height: 1.65; color: var(--ink-prose); max-width: 70ch; }
+  .prose p { margin: 0 0 12px; }
+  .prose h4 { font-family: var(--sans); font-size: 13px; margin: 16px 0 4px; color: var(--ink-dim); font-weight: 600; }
+  .stmt { margin: 0 0 26px; padding: 0 0 22px; border-bottom: 1px solid var(--border-soft); position: relative; }
+  .stmt:last-child { border-bottom: 0; }
+  .stmt .kind { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .stmt h4 { margin: 2px 0 6px; font-size: 16px; font-weight: 600; color: var(--ink); }
+  .stmt .ask { position: absolute; right: 0; top: 0; opacity: 0; transition: opacity .12s; }
+  .stmt:hover .ask { opacity: 1; }
+  .stmt .foot { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-top: 10px; font-size: 12px; color: var(--faint); }
+  .stmt .foot .f { font-family: var(--mono); color: var(--muted); }
+  .stmt .foot .f:hover { color: var(--ink); text-decoration: underline; cursor: pointer; }
+  .stmt .foot .sep { color: var(--border); }
+  .diag { border: 1px solid var(--border); border-radius: var(--r-sm); background: #151514; padding: 14px; margin: 10px 0 4px; max-width: 560px; position: relative; }
+  .diag .tools { position: absolute; right: 8px; top: 8px; display: flex; gap: 6px; }
+  .diag svg { width: 100%; height: auto; display: block; font-family: "IBM Plex Sans", var(--sans); }
+
+  .deps2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .ochre { color: var(--wait); }
+
+  /* ================= queue ================= */
+  .tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 18px 0 8px; }
+  .tile { border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); padding: 12px 16px; }
+  .tile .k { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+  .tile .v { font-size: 22px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .tile .v small { font-size: 12.5px; color: var(--muted); margin-left: 6px; }
+  .qlist { border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); overflow: hidden; }
+  .qrow { display: grid; grid-template-columns: 90px 70px 1fr auto; gap: 14px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border-soft); font-size: 13.5px; }
+  .qrow:last-child { border-bottom: 0; }
+  .qrow .slot { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+  .qrow .slot.now { color: var(--accent-strong); }
+  .qrow .what { color: var(--ink); }
+  .qrow .what small { display: block; color: var(--faint); font-size: 12px; margin-top: 2px; }
+  .qrow .what small.hold { color: var(--wait); }
+  .qrow .what small.hold::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--wait); margin-right: 6px; vertical-align: 1px; }
+  .qrow .right { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: right; }
+</style>
+
+<!-- ================= TEMPLATE: the whole app, cloned per shell ================= -->
+<template id="app-tpl">
+<div class="app" data-shell="a" data-page="ask">
+  <header class="bar">
+    <div class="brand">Rongo<small>+ Almanach</small></div>
+    <nav class="topnav" aria-label="Pages">
+      <button data-go="ask">Ask</button>
+      <button data-go="project">Projects</button>
+      <button data-go="deps">Dependencies</button>
+      <button data-go="sources">Sources</button>
+      <button data-go="queue">Queue<span class="cnt">2</span></button>
+    </nav>
+    <div class="crumb" data-crumb></div>
+    <div class="user">j.meier@firma.ch<button>Sign out</button></div>
+  </header>
+
+  <div class="body">
+    <aside class="rail">
+      <div class="lbl explore" style="padding-top:16px">Explore</div>
+      <nav class="nav" aria-label="Pages">
+        <button data-go="ask"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v8H6l-3 3v-3H2z"/></svg>Ask</button>
+        <button data-go="project"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M2 6h12M6 6v8"/></svg>Projects</button>
+        <button data-go="deps"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="4" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="11" cy="6" r="1.5"/><path d="M5 5.5v5M11 7.5c0 2-6 1-6 3"/></svg>Dependencies</button>
+        <button data-go="sources"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4a5 1.5 0 0 1 10 0v8a5 1.5 0 0 1-10 0z"/><path d="M3 4a5 1.5 0 0 0 10 0M3 8a5 1.5 0 0 0 10 0"/></svg>Sources</button>
+        <button data-go="queue"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h10M3 8h7M3 12h4"/></svg>Queue<span class="cnt">2</span></button>
+      </nav>
+      <div class="threadwrap">
+        <div class="lbl">History<span class="n">7</span></div>
+        <nav class="threads" aria-label="Threads">
+          <button aria-current="true"><span class="t">Cancelling an order twice</span><span class="pulse" aria-hidden="true"></span><time>09:14</time></button>
+          <button><span class="t">Voucher expiry on refunds</span><time>08:02</time></button>
+          <button><span class="t">VAT calculation Germany</span><time>yest.</time></button>
+          <button><span class="t">Where does the order number come from?</span><time>yest.</time></button>
+          <button><span class="t">Writes to the customer master data</span><time>28 Oct</time></button>
+          <button><span class="t">Retry policy of the payment webhook</span><time>21 Oct</time></button>
+          <button><span class="t">How are duplicates merged?</span><time>12 Oct</time></button>
+        </nav>
+      </div>
+      <div class="crail-slot"></div>
+      <div class="railfoot"><div><i aria-hidden="true"></i>Index current · 6 min ago</div><div><i class="wait" aria-hidden="true"></i>Wiki: 2 queued · 1 describing</div></div>
+    </aside>
+
+    <main>
+      <!-- ================= ASK ================= -->
+      <section data-view="ask" data-title="Cancelling an order twice" data-crumb="Threads">
+        <div class="ask">
+          <div class="col">
+            <div class="scroll">
+            <div class="thread">
+
+              <article class="turn">
+                <div class="eyebrow role">Analyst</div>
+                <p class="q">Why can an order be cancelled twice?</p>
+                <div class="meta"><time>09:14:07</time><span class="pill dim">turn 1</span></div>
+                <div class="prog" role="status">
+                  <ol class="steps">
+                    <li class="done"><i aria-hidden="true"></i><span>Understanding the question</span><time>0.8s</time></li>
+                    <li class="done"><i aria-hidden="true"></i><span>Two projects hold an order</span><time>1.6s</time></li>
+                    <li class="end decided"><i aria-hidden="true"></i><span>Asked back, choice made</span><time>3.9s</time></li>
+                  </ol>
+                </div>
+                <div class="clar">
+                  <button aria-expanded="false"><svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lab">Chosen</span><span class="mono" style="color:var(--wait)">shop</span>Storefront and checkout<span class="sub2">System · 3 repositories · 2 candidates</span></button>
+                  <div class="cands" hidden>
+                    <div class="cand"><div class="l1"><span class="proj">shop</span><span class="pill dim" style="font-size:10.5px;padding:0 7px">System</span><span class="reps">shop-backend · shop-ui · shop-events</span><span class="hair"></span><span class="pill accent" style="font-size:10.5px;padding:0 7px">Chosen</span></div><div class="l2">Storefront and checkout</div><div class="l3">Storefront-API, Checkout und die Bestell-Ereignisse; die Zahlung läuft über payments-client.<span class="tagsrc">Almanach</span></div></div>
+                    <div class="cand"><div class="l1"><span class="proj">billing</span><span class="pill dim" style="font-size:10.5px;padding:0 7px">Sammlung</span><span class="reps">billing-core · invoice-pdf</span><span class="hair"></span></div><div class="l2">Invoicing and dunning</div><div class="l3">Rechnungsstellung und Mahnwesen, je für sich; Stornos treffen hier als Gutschrift ein.<span class="tagsrc">Almanach</span></div></div>
+                    <div class="cand all"><div class="l2">All repositories</div><div class="l3">Search the whole estate and sort it out in the answer.</div></div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="turn">
+                <div class="eyebrow role">Analyst</div>
+                <p class="q">Why can an order be cancelled twice?</p>
+                <div class="meta"><time>09:15:02</time><span class="pill dim">turn 2</span><span class="pill dim">from choice 1</span></div>
+                <div class="prog" role="status">
+                  <ol class="steps">
+                    <li class="done"><i aria-hidden="true"></i><span>Searching shop · 3 repositories</span><time>1.4s</time></li>
+                    <li class="done"><i aria-hidden="true"></i><span>Reading Almanach: shop-backend, 4 statements<span class="wiki">wiki</span></span><time>0.3s</time></li>
+                    <li class="done"><i aria-hidden="true"></i><span>Reading shop-backend/internal/order</span><time>1.9s</time></li>
+                    <li class="done"><i aria-hidden="true"></i><span>Checking relevance</span><time>0.7s</time></li>
+                    <li class="done"><i aria-hidden="true"></i><span>Writing the answer</span><time>6.2s</time></li>
+                    <li class="end done"><i aria-hidden="true"></i><span>Done</span><time>10.5s</time></li>
+                  </ol>
+                </div>
+                <div class="ans">
+                  <p>It no longer can. Cancelling an order reads its state and sets it to cancelled in the same database transaction<sup><a href="#b1">1</a></sup>. A second cancel request finds the order already cancelled and is answered with a conflict, not a success<sup><a href="#b2">2</a></sup>; nothing downstream runs twice.</p>
+                  <p>This used to be possible. Before pull request 412 the state was read first and written later, and two requests arriving within the same second both passed the check. Each of them then triggered a refund, which is how the double credit notes in billing came about<sup><a href="#b3">3</a></sup>. The wiki records the fix as an invariant of the order component<sup><a href="#b4" class="wiki">4</a></sup>; the code that enforces it is the state check inside the cancel transaction<sup><a href="#b1">1</a></sup>.</p>
+                  <p>What still happens on the second request is a log line and the conflict response. The customer-facing storefront treats that conflict as "already cancelled" and shows the order in its cancelled state.</p>
+                </div>
+                <div class="facts">
+                  <button class="btn">Explain as Developer<kbd>d</kbd></button>
+                  <button class="btn">Open in wiki<kbd>w</kbd></button>
+                  <button class="btn">Copy as Markdown<kbd>c</kbd></button>
+                  <span class="pill dim">5 102 tokens · $0.041</span>
+                </div>
+              </article>
+
+              <article class="turn">
+                <div class="eyebrow role">Analyst</div>
+                <p class="q">And what happens to the refund when the payment service is down?</p>
+                <div class="meta"><time>09:21:40</time><span class="pill dim">turn 3</span></div>
+                <div class="prog" role="status" aria-live="polite">
+                  <ol class="steps">
+                    <li class="done"><i aria-hidden="true"></i><span>Understanding the question</span><time>0.7s</time></li>
+                    <li class="done"><i aria-hidden="true"></i><span>Reading Almanach: payments-client is shared by 2 projects<span class="wiki">wiki</span></span><time>0.2s</time></li>
+                    <li class="end wait"><i aria-hidden="true"></i><span>Waiting for a choice</span><time>1.3s</time></li>
+                  </ol>
+                </div>
+                <div class="clar open">
+                  <button aria-expanded="true"><svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Which one do you mean?<span class="sub2">payments-client is used by both</span></button>
+                  <div class="cands">
+                    <div class="cand"><div class="l1"><span class="proj">shop</span><span class="pill dim" style="font-size:10.5px;padding:0 7px">System</span><span class="reps">shop-backend → payments-client</span><span class="hair"></span></div><div class="l2">The refund the storefront triggers on cancel</div><div class="l3">shop-backend reserviert und erstattet über payments-client; ein Ausfall wird dort mit Wiederholung behandelt.<span class="tagsrc">Almanach</span></div></div>
+                    <div class="cand"><div class="l1"><span class="proj">billing</span><span class="pill dim" style="font-size:10.5px;padding:0 7px">Sammlung</span><span class="reps">billing-core → payments-client</span><span class="hair"></span></div><div class="l2">The credit note billing settles later</div><div class="l3">billing-core gleicht Gutschriften nachts ab; ein Ausfall verschiebt den Lauf auf die nächste Nacht.<span class="tagsrc">Almanach</span></div></div>
+                  </div>
+                </div>
+              </article>
+
+              <div class="callout"><span class="tag">Open decision 2</span><b>Rongo's invariant: never store or embed model text about code.</b><p>Almanach pages are exactly that. Here they are rendered as a doc-class claim (ochre marker, own entry kind, never styled as a file read), and the answer is still written from the code. How the pages enter retrieval is a backend question outside this mock; the likely seam is Almanach's per-repository Markdown export landing in Rongo's doc lane under the doc decay. Reopening the invariant needs a <code>TestEvalMeasureAnswers</code> number, run twice.</p></div>
+            </div>
+            </div>
+            <form class="dock" onsubmit="return false">
+              <div class="pastes"><span class="paste"><span class="eyebrow">Almanach · Invariante · shop-backend</span><span class="t">«Eine Bestellung wird höchstens einmal storniert»</span><button class="x" aria-label="Remove">×</button></span></div>
+              <div class="prompt">
+                <div class="ctl"><div class="rolepill" role="group" aria-label="Role"><button aria-pressed="true">Analyst</button><button aria-pressed="false">Developer</button></div><span class="scope">Scope <b>shop</b></span></div>
+                <textarea rows="1" aria-label="Question" placeholder="Ask about the code…"></textarea>
+                <button class="go" type="submit">Ask</button>
+              </div>
+              <div class="dockhint">Answers read the code; the wiki is context, cited apart and never quoted as code. A statement opened from a wiki page travels with the question as a paste.</div>
+            </form>
+          </div>
+
+          <aside class="ev" aria-label="Sources">
+            <header>Sources<span class="n">Turn 2 · 4</span></header>
+            <div class="list">
+              <div class="src hot" id="b1"><span class="m">1</span><span class="repo">shop-backend<span>master</span></span><span class="path">internal/order/<b>cancel.go</b>:41-88</span></div>
+              <div class="src" id="b2"><span class="m">2</span><span class="repo">shop-backend<span>master</span></span><span class="path">internal/order/<b>state.go</b>:12-39</span></div>
+              <div class="src" id="b3"><span class="m">3</span><span class="repo">shop-backend<span>master</span></span><span class="path"><span class="sha">7c21e0a</span> · 14 Oct · <b>order: cancel in one transaction</b></span></div>
+              <div class="src wiki" id="b4"><span class="m">4</span><span class="repo">shop-backend<span>wiki · rev 9</span></span><span class="eyebrow">Almanach · Invariante</span><span class="sname">Eine Bestellung wird höchstens einmal storniert</span><span class="files">internal/order/cancel.go · internal/order/state.go</span><span class="prs"><a class="prchip" href="#">SHOP/shop-backend#412</a><span class="prchip quiet">Geprüft a3f1c02</span></span></div>
+            </div>
+            <div class="note"><b>Two kinds of source.</b> Files and commits are evidence, read at the indexed commit. A wiki statement is a claim Almanach wrote from code and pull requests; it opens on the wiki page, not in the file viewer.</div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ================= PROJECT ================= -->
+      <section data-view="project" data-title="shop" data-crumb="Projects">
+        <template class="crail">
+          <div class="crail">
+            <div class="search"><input placeholder="Search the description"><kbd>/</kbd></div>
+            <div class="grp">Overview</div>
+            <a href="#" aria-current="true">System overview</a>
+            <a href="#">Repositories<span class="n">3</span></a>
+            <a href="#">Problem areas<span class="n">2</span></a>
+            <a href="#">Recent notes<span class="n">41</span></a>
+            <div class="grp">Description</div>
+            <a href="#">Überblick</a>
+            <a href="#">Bestellung und Zahlung<span class="n">6</span></a>
+            <a href="#">Schnittstellen<span class="n">3</span></a>
+            <a href="#">Entwicklung und Auslieferung<span class="n">2</span></a>
+          </div>
+        </template>
+        <div class="scroll">
+        <div class="page">
+          <div class="crail-b"></div>
+          <div class="col">
+          <div class="crumbs"><a href="#">Projects</a><span>/</span><span>shop</span></div>
+          <div class="head">
+            <div class="grow">
+              <h2>shop</h2>
+              <div class="metaline"><span class="pill dim" title="Almanach reads the repositories as one system: the project page describes how they work together, the repository pages how each works inside.">System</span><span>Team Storefront</span><span class="sep">·</span><span>3 repositories</span><span class="sep">·</span><span>41 notes</span><span class="sep">·</span><span>Description revision 17</span><span class="sep">·</span><span>last merge 4 Nov</span><span class="sep">·</span><span class="ix">Indexed 6 min ago</span></div>
+            </div>
+            <div class="acts"><button class="btn primary">Ask about this project</button></div>
+          </div>
+          <div class="tabs" role="tablist"><button role="tab" aria-selected="true">Overview</button><button role="tab">Description<span class="n">11</span></button></div>
+
+          <div class="strip">
+            <div><div class="k">Repositories</div><div class="v">3<small>+1 shared</small></div></div>
+            <div class="rongo"><div class="k">Files</div><div class="v">2 557</div></div>
+            <div class="rongo"><div class="k">Chunks</div><div class="v">19 240</div></div>
+            <div><div class="k">Statements</div><div class="v">118</div></div>
+            <div><div class="k">Notes</div><div class="v">41</div></div>
+            <div class="rongo"><div class="k">Last poll</div><div class="v">6m<small>ago</small></div></div>
+          </div>
+
+          <h3 class="sec">System overview<small>what runs in production</small><span class="push"><button class="icobtn" title="Full view"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6V2h4M14 10v4h-4M2 2l5 5M14 14 9 9"/></svg></button><button class="icobtn" title="Download SVG"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v9M4 7l4 4 4-4M2 14h12"/></svg></button></span></h3>
+          <div class="map" data-map>
+            <div class="band"><div class="z">Clients</div><div class="names"><span data-id="browser">Browser</span><span data-id="pos">POS-Terminal</span></div></div>
+            <div class="band"><div class="z">Entry</div><div class="names"><span data-id="gw">API-Gateway</span></div></div>
+            <div class="band"><div class="z">Repositories</div><div class="boxes">
+              <div class="box" data-id="shop-ui" data-to="gw:out:HTTP"><div class="nn">shop-ui</div><div class="nd">Kundenseitiger Storefront in React; spricht ausschliesslich die Storefront-API.</div></div>
+              <div class="box focus" data-id="shop-backend" data-to="gw:in:HTTP,pg:out:DB,kafka:out:event,payments-client:out:library,psp:out:HTTP"><div class="nn">shop-backend</div><div class="nd">Storefront-API und Checkout: nimmt Bestellungen entgegen, reserviert Bestand, übergibt die Zahlung.</div></div>
+              <div class="box" data-id="shop-events" data-to="kafka:in:event,pg:out:DB"><div class="nn">shop-events</div><div class="nd">Kafka-Consumer, der Bestell-Ereignisse in die Shop-Datenbank schreibt.</div></div>
+            </div></div>
+            <div class="band"><div class="z">Shared repositories</div><div class="boxes"><div class="box shared" data-id="payments-client" data-to="shop-backend:in:library"><div class="nn">payments-client</div><div class="nd">Client-Modul für den Zahlungsdienst; von shop-backend und billing-core verwendet.</div></div></div></div>
+            <div class="band"><div class="z">Stores</div><div class="names"><span data-id="pg">PostgreSQL shop</span><span data-id="kafka">Kafka orders.*</span></div></div>
+            <div class="band"><div class="z">External systems</div><div class="names"><span data-id="psp">Zahlungsdienst (PSP)</span><span data-id="erp">ERP</span></div></div>
+            <div class="conn" data-conn>shop-backend: connected with <b>API-Gateway</b><span class="w">←</span>HTTP, <b>PostgreSQL shop</b><span class="w">→</span>DB, <b>Kafka orders.*</b><span class="w">→</span>event, <b>payments-client</b><span class="w">→</span>library, <b>Zahlungsdienst (PSP)</b><span class="w">→</span>HTTP</div>
+          </div>
+          <p style="margin:6px 0 0;font-size:12px;color:var(--faint)">Bands top to bottom, repositories as boxes with their teaser, no arrows: point at a box and its connections light with their way and kind. The full view draws the arrows. Replaces Rongo's <code>uses:</code> wiring panel; the shared repository comes from the build manifests, not from a hand-written list.</p>
+
+          <h3 class="sec">Repositories</h3>
+          <table class="tbl">
+            <thead><tr><th>Repository</th><th>Description</th><th class="num">Notes</th><th>Last merge</th><th class="rongo">State</th><th class="rongo">Indexed</th><th class="num rongo">Files</th><th class="num rongo">Chunks</th></tr></thead>
+            <tbody>
+              <tr class="row"><td><span class="name">shop-backend</span><div class="sub"><span class="pill kind">backend</span><span class="mono">master</span></div></td><td class="teaser">Storefront-API und Checkout: nimmt Bestellungen entgegen, reserviert Bestand und übergibt die Zahlung an payments-client.</td><td class="num">23</td><td><span class="sha">#412</span><span class="when">4 Nov</span></td><td><span class="pill accent">Indexed</span></td><td><span class="sha">a3f1c02</span><span class="when">6m</span></td><td class="num">1 204</td><td class="num">9 881</td></tr>
+              <tr class="row"><td><span class="name">shop-ui</span><div class="sub"><span class="pill kind">ui</span><span class="mono">main</span></div></td><td class="teaser">Kundenseitiger Storefront in React; spricht ausschliesslich die Storefront-API und kennt keine Zahlung.</td><td class="num">12</td><td><span class="sha">#418</span><span class="when">3 Nov</span></td><td><span class="pill accent">Indexed</span></td><td><span class="sha">7bd9e14</span><span class="when">6m</span></td><td class="num">642</td><td class="num">4 117</td></tr>
+              <tr class="row" data-state="error"><td><span class="name">shop-events</span><div class="sub"><span class="pill kind">consumer</span><span class="mono">master</span></div><div class="errline">Branch master moved to a rewritten history; the index is frozen at the last run.</div></td><td class="teaser">Kafka-Consumer, der Bestell-Ereignisse in die Shop-Datenbank schreibt und Duplikate über die Ereignis-Id erkennt.</td><td class="num">6</td><td><span class="sha">#377</span><span class="when">12 Oct</span></td><td><span class="pill ochre">Error</span></td><td><span class="sha">e51b7d3</span><span class="when">28 Oct</span></td><td class="num">198</td><td class="num">1 340</td></tr>
+            </tbody>
+          </table>
+
+          <h3 class="sec">Problem areas<small>last 90 days</small></h3>
+          <table class="tbl">
+            <thead><tr><th>Repository</th><th>Area</th><th>Component</th><th class="num">Bugfixes</th><th>Most common cause</th><th class="num">Issues / hints</th><th>Last fix</th></tr></thead>
+            <tbody>
+              <tr class="row"><td class="name">shop-backend</td><td class="mono">internal/order</td><td>Bestellung</td><td class="num">4</td><td>Nebenläufigkeit</td><td class="num">9 / 14</td><td><span class="sha">#412</span><span class="when">14 Oct</span></td></tr>
+              <tr class="row"><td class="name">shop-events</td><td class="mono">internal/consume</td><td>Ereignis-Consumer</td><td class="num">2</td><td>Eingabeprüfung</td><td class="num">3 / 5</td><td><span class="sha">#377</span><span class="when">12 Oct</span></td></tr>
+            </tbody>
+          </table>
+
+          <h3 class="sec">Recent notes</h3>
+          <table class="tbl">
+            <thead><tr><th>PR</th><th>Title</th><th>Kind</th><th class="num">Entries</th><th class="num">Issues / hints</th><th>Merge</th></tr></thead>
+            <tbody>
+              <tr class="row"><td class="mono">SHOP/shop-ui#418</td><td>Cancelled state on the order page</td><td><span class="pill dim">Feature</span></td><td class="num">3</td><td class="num">1 / 2</td><td class="when" style="margin:0">3 Nov 16:40</td></tr>
+              <tr class="row"><td class="mono">SHOP/shop-backend#412</td><td>Cancel in one transaction</td><td><span class="pill dim">Bugfix</span></td><td class="num">5</td><td class="num">2 / 4</td><td class="when" style="margin:0">14 Oct 11:02</td></tr>
+              <tr class="row"><td class="mono">SHOP/shop-backend#409</td><td>Reserve stock before payment</td><td><span class="pill dim">Refactoring</span></td><td class="num">4</td><td class="num">0 / 3</td><td class="when" style="margin:0">9 Oct 09:15</td></tr>
+            </tbody>
+          </table>
+
+          <div class="callout"><span class="tag">Open decision 4</span><b>One project model.</b><p>Rongo declares <code>libraries:</code> and <code>uses:</code> by hand; Almanach derives edges from go.mod, pom.xml, package.json and Gradle and calls a repository others depend on "shared". This page draws Almanach's model: edges from manifests, shared repositories as a band of their own. A hand <code>uses:</code> stays only where no manifest exists. Tradeoff: a runtime dependency over HTTP is in no manifest; only the model's map shows it.</p></div>
+          </div>
+        </div>
+        </div>
+      </section>
+
+      <!-- ================= REPOSITORY ================= -->
+      <section data-view="repo" data-title="shop-backend" data-crumb="Projects / shop">
+        <template class="crail">
+          <div class="crail">
+            <div class="head"><span>Project</span><b>shop</b><span class="nav2">‹ 1 / 3 › ▾</span></div>
+            <div class="search"><input placeholder="Search the description"><kbd>/</kbd></div>
+            <div class="grp">Description</div>
+            <a href="#">Structure</a>
+            <a href="#">Überblick</a>
+            <a href="#">Problem areas<span class="n">1</span></a>
+            <a href="#">Dependencies<span class="n">1 · 0</span></a>
+            <a href="#" aria-current="true">Bestellung und Checkout<span class="n">4</span></a>
+            <a href="#">Schnittstellen<span class="n">1</span></a>
+            <a href="#">Entwicklung und Auslieferung<span class="n">2</span></a>
+            <div class="grp">History</div>
+            <a href="#">Notes<span class="n">23</span></a>
+            <a href="#">Revisions<span class="n">9</span></a>
+          </div>
+        </template>
+        <div class="scroll">
+        <div class="page">
+          <div class="crail-b"></div>
+          <div class="col">
+          <div class="crumbs"><a href="#">Projects</a><span>/</span><a href="#">shop</a><span>/</span><span>shop-backend</span></div>
+          <div class="head">
+            <div class="grow">
+              <h2>shop-backend</h2>
+              <div class="metaline"><span>Project shop</span><span class="sep">·</span><span>23 notes</span><span class="sep">·</span><span>Description revision 9</span><span class="sep">·</span><span>last merge 4 Nov</span><span class="sep">·</span><span class="ix">Indexed <span class="sha">a3f1c02</span> · 6m · 1 204 files</span></div>
+            </div>
+            <div class="acts"><button class="btn">Open source at a3f1c02</button><button class="btn primary">Ask about this repository</button></div>
+          </div>
+          <div class="tabs" role="tablist"><button role="tab" aria-selected="true">Description<span class="n">31</span></button><button role="tab">History<span class="n">23</span></button></div>
+
+          <h3 class="sec">Structure<small>the repository from inside</small><span class="push"><button class="icobtn" title="Full view"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6V2h4M14 10v4h-4M2 2l5 5M14 14 9 9"/></svg></button><button class="icobtn" title="Download SVG"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v9M4 7l4 4 4-4M2 14h12"/></svg></button></span></h3>
+          <div class="map">
+            <div class="band"><div class="z">Entry</div><div class="names"><span>HTTP-Router (openapi.yaml)</span><span>Kafka-Producer</span></div></div>
+            <div class="band"><div class="z">Parts</div><div class="boxes">
+              <div class="box"><div class="nn">order</div><div class="nd">Bestellung, Zustand, Storno in einer Transaktion.</div></div>
+              <div class="box"><div class="nn">stock</div><div class="nd">Reservierung mit Ablauf; nie Abbuchung.</div></div>
+              <div class="box"><div class="nn">checkout</div><div class="nd">Warenkorb zu Bestellung; ruft payment.</div></div>
+              <div class="box"><div class="nn">payment</div><div class="nd">Hülle um payments-client, Wiederholung bei Ausfall.</div></div>
+            </div></div>
+            <div class="band"><div class="z">Stores</div><div class="names"><span>PostgreSQL shop</span></div></div>
+            <div class="band"><div class="z">External systems</div><div class="names"><span>Zahlungsdienst (PSP)</span><span>Kafka orders.*</span></div></div>
+          </div>
+
+          <h3 class="sec">Überblick</h3>
+          <div class="prose">
+            <p>shop-backend ist die Storefront-API des Shops: es nimmt Bestellungen aus dem Warenkorb entgegen, reserviert den Bestand, übergibt die Zahlung an den Zahlungsdienst und schreibt jede Zustandsänderung als Ereignis nach Kafka. Was ausserhalb liegt: die Rechnung (billing) und die Auslieferung (ERP) lesen die Ereignisse, das Backend ruft sie nie.</p>
+            <h4>Aufbau</h4>
+            <p>Vier Teile unter <code>internal/</code>: <code>order</code> hält Bestellung und Zustand, <code>stock</code> die Reservierung, <code>checkout</code> den Weg vom Warenkorb zur Bestellung, <code>payment</code> die Hülle um payments-client. Der HTTP-Router liegt in <code>cmd/api</code>, der Vertrag in <code>openapi.yaml</code>.</p>
+            <h4>Arbeiten am Repository</h4>
+            <p>Gate ist <code>make check</code>; kein Test spricht den Zahlungsdienst an, <code>httptest</code> ersetzt ihn. Eine neue Route: Handler, openapi.yaml, Test, in dieser Reihenfolge.</p>
+          </div>
+
+          <h3 class="sec">Problem areas<small>last 90 days</small></h3>
+          <table class="tbl">
+            <thead><tr><th>Area</th><th>Component</th><th class="num">Bugfixes</th><th>Most common cause</th><th class="num">Issues / hints</th><th>Last fix</th></tr></thead>
+            <tbody><tr class="row"><td class="mono">internal/order</td><td>Bestellung</td><td class="num">4</td><td>Nebenläufigkeit</td><td class="num">9 / 14</td><td><span class="sha">#412</span><span class="when">14 Oct</span></td></tr></tbody>
+          </table>
+
+          <h3 class="sec">Dependencies</h3>
+          <div class="deps2">
+            <table class="tbl"><thead><tr><th>Uses</th><th>Version</th></tr></thead><tbody><tr class="row"><td class="name">payments-client</td><td class="mono ochre" title="A different version from the other users">v2.3.0</td></tr></tbody></table>
+            <table class="tbl"><thead><tr><th>Used by</th><th>Version</th></tr></thead><tbody><tr><td colspan="2" style="color:var(--faint)">none</td></tr></tbody></table>
+          </div>
+
+          <h3 class="sec">Bestellung und Checkout<small>4 statements</small></h3>
+
+          <div class="stmt">
+            <div class="kind">Invariante</div>
+            <h4>Eine Bestellung wird höchstens einmal storniert</h4>
+            <button class="btn small ask">Ask about this</button>
+            <div class="prose"><p>Der Stornoendpunkt prüft den Zustand der Bestellung in derselben Transaktion, in der er ihn setzt. Ein zweiter Aufruf findet den Zustand <code>cancelled</code> vor und antwortet 409, nie 200: die Rückerstattung liefe sonst zweimal. Vor #412 lag zwischen Prüfung und Schreiben ein zweiter Aufruf, und beide lösten eine Rückerstattung aus.</p></div>
+            <div class="foot"><span class="f">internal/order/cancel.go</span><span class="f">internal/order/state.go</span><span class="sep">|</span><a class="prchip" href="#">SHOP/shop-backend#412</a><span class="prchip quiet">Geprüft a3f1c02</span></div>
+          </div>
+
+          <div class="stmt">
+            <div class="kind">Ablauf</div>
+            <h4>Checkout</h4>
+            <button class="btn small ask">Ask about this</button>
+            <div class="prose"><p>Der Warenkorb wird zur Bestellung, der Bestand reserviert, dann erst die Zahlung angestossen. Schlägt die Zahlung fehl, läuft die Reservierung ab; die Bestellung bleibt als <code>pending</code> stehen und wird vom nächtlichen Aufräumen gelöscht.</p></div>
+            <div class="diag">
+              <div class="tools"><button class="icobtn" title="Full view"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6V2h4M14 10v4h-4M2 2l5 5M14 14 9 9"/></svg></button></div>
+              <svg viewBox="0 0 520 110" aria-label="Ablaufdiagramm Checkout">
+                <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 8 4 0 8z" fill="#a29e94"/></marker></defs>
+                <g font-size="12" fill="#ece8df">
+                  <rect x="8" y="30" width="110" height="40" rx="6" fill="#201f1c" stroke="#3b3935"/><text x="63" y="54" text-anchor="middle">Warenkorb</text>
+                  <rect x="150" y="30" width="110" height="40" rx="6" fill="#201f1c" stroke="#3b3935"/><text x="205" y="54" text-anchor="middle">Bestellung</text>
+                  <rect x="292" y="30" width="110" height="40" rx="6" fill="#201f1c" stroke="#3b3935"/><text x="347" y="54" text-anchor="middle">Reservierung</text>
+                  <rect x="434" y="30" width="80" height="40" rx="6" fill="#201f1c" stroke="#d97757"/><text x="474" y="54" text-anchor="middle">Zahlung</text>
+                </g>
+                <g stroke="#a29e94" stroke-width="1.2" marker-end="url(#ah)"><path d="M118 50h32"/><path d="M260 50h32"/><path d="M402 50h32"/></g>
+                <path d="M474 70v22H205v-22" fill="none" stroke="#a29e94" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+                <text x="340" y="104" font-size="10.5" fill="#a29e94" text-anchor="middle">fehlgeschlagen: Reservierung läuft ab, Bestellung bleibt pending</text>
+              </svg>
+            </div>
+            <div class="foot"><span class="f">internal/checkout/checkout.go</span><span class="f">internal/stock/reserve.go</span><span class="sep">|</span><span class="prchip quiet">Basis a3f1c02</span></div>
+          </div>
+
+          <div class="stmt">
+            <div class="kind">Entscheidung</div>
+            <h4>Bestand wird reserviert, nicht abgebucht</h4>
+            <button class="btn small ask">Ask about this</button>
+            <div class="prose"><p>Eine Reservierung mit Ablauf statt einer Abbuchung beim Checkout: eine abgebrochene Zahlung gibt den Bestand von selbst frei, ohne Gegenbuchung. Aufgegeben wurde die exakte Lagerzahl während der Ablauffrist; das ERP liest sie darum nur aus den Ereignissen, nie aus der Tabelle.</p></div>
+            <div class="foot"><span class="f">internal/stock/reserve.go</span><span class="f">docs/adr/0004-reservation.md</span><span class="sep">|</span><a class="prchip" href="#">SHOP/shop-backend#409</a></div>
+          </div>
+
+          <div class="stmt">
+            <div class="kind">Fallstrick</div>
+            <h4>Reservierung läuft ab, bevor die Zahlung bestätigt ist</h4>
+            <button class="btn small ask">Ask about this</button>
+            <div class="prose"><p>Der Zahlungsdienst bestätigt bis zu 20 Minuten später; die Reservierung lief nach 15 Minuten ab, und die bestätigte Bestellung hatte keinen Bestand mehr. Seit #398 verlängert die Bestätigung die Reservierung, und die Frist ist Konfiguration, nicht Konstante.</p></div>
+            <div class="foot"><span class="f">internal/stock/reserve.go</span><span class="f">internal/payment/confirm.go</span><span class="sep">|</span><a class="prchip" href="#">SHOP/shop-backend#398</a></div>
+          </div>
+
+          <h3 class="sec">Schnittstellen<small>1 statement</small></h3>
+          <div class="stmt">
+            <div class="kind">Schnittstelle</div>
+            <h4>Storefront-API</h4>
+            <button class="btn small ask">Ask about this</button>
+            <div class="prose"><p>HTTP, Vertrag in <code>openapi.yaml</code>; Nutzer ist shop-ui. Breaking ist jede entfernte Route und jedes entfernte Feld einer Antwort; neue Felder sind es nicht, shop-ui ignoriert Unbekanntes.</p></div>
+            <div class="foot"><span class="f">openapi.yaml</span><span class="f">cmd/api/routes.go</span><span class="sep">|</span><span class="prchip quiet">Basis a3f1c02</span><a class="prchip" href="#">SHOP/shop-ui#418</a></div>
+          </div>
+
+          <div class="callout"><span class="tag">Open decision 3</span><b>Rongo's Repos page is read-only and the list lives in repos.yaml.</b><p>In this picture the list is Almanach's sources (next page) and Rongo's checkout and index follow it. That is a rule change for Rongo, not a layout choice: one list, one clone per repository, the index reading the clone Almanach keeps.</p></div>
+          </div>
+        </div>
+        </div>
+      </section>
+
+      <!-- ================= SOURCES ================= -->
+      <section data-view="sources" data-title="Sources" data-crumb="">
+        <div class="scroll">
+        <div class="page" style="display:block">
+          <div class="col">
+          <div class="head">
+            <div class="grow"><h2>Sources</h2><p class="lede">The one place repositories are managed. A source is a project: a Bitbucket project listed from its API, or a folder of repositories entered by clone URL. Almanach clones and describes them, Rongo indexes the same clone; a token never leaves the machine.</p></div>
+            <div class="acts"><button class="btn primary">New source</button></div>
+          </div>
+          <table class="tbl">
+            <thead><tr><th>Slug</th><th>Kind</th><th>Host</th><th>Token</th><th class="num">Repos</th><th>State</th><th>Last run</th><th class="rongo">Index</th></tr></thead>
+            <tbody>
+              <tr class="row"><td class="name">SHOP</td><td><span class="pill dim">Bitbucket</span></td><td class="mono">git.firma.ch</td><td><span class="pill quiet">Stored</span></td><td class="num">4</td><td><span class="pill ok"><i></i>3 ready</span> <span class="pill ochre"><i></i>1 running</span></td><td><span class="when" style="margin:0">today 09:08</span></td><td><span class="pill accent">Indexed</span><span class="when">6m</span></td></tr>
+              <tr class="row"><td class="name">BILLING</td><td><span class="pill dim">Bitbucket</span></td><td class="mono">git.firma.ch</td><td><span class="pill quiet">Stored</span></td><td class="num">2</td><td><span class="pill ok"><i></i>2 ready</span></td><td><span class="when" style="margin:0">today 09:08</span></td><td><span class="pill accent">Indexed</span><span class="when">6m</span></td></tr>
+              <tr class="row"><td class="name">rongo</td><td><span class="pill dim">Single</span></td><td class="mono">github.com</td><td><span class="pill quiet">Public</span></td><td class="num">1</td><td><span class="pill ok"><i></i>1 ready</span></td><td><span class="when" style="margin:0">yest. 22:10</span></td><td><span class="pill accent">Indexed</span><span class="when">6m</span></td></tr>
+              <tr class="row" data-state="error"><td class="name">legacy-crm</td><td><span class="pill dim">Single</span></td><td class="mono">git.firma.ch</td><td><span class="pill quiet">Stored</span></td><td class="num">1</td><td><span class="pill fail"><i></i>1 failed</span></td><td><span class="when" style="margin:0">3 Aug</span></td><td><span class="pill dim">Disabled</span></td></tr>
+            </tbody>
+          </table>
+
+          <div class="crumbs" style="margin-top:40px"><a href="#">Sources</a><span>/</span><span>SHOP</span></div>
+          <div class="head">
+            <div class="grow"><h2>SHOP</h2>
+              <div class="metaline"><span class="pill dim">Bitbucket</span><a href="#" style="color:var(--muted)">git.firma.ch/projects/SHOP</a><span class="sep">·</span><span class="pill quiet">Token stored (Bearer)</span><span class="sep">·</span><span>listed today 09:08</span></div>
+            </div>
+            <div class="acts"><button class="btn">Synchronise</button><button class="btn">Add repository</button><button class="btn">Host and token</button><button class="btn">Rename</button><button class="btn danger">Remove source</button><button class="btn">Re-index all</button></div>
+          </div>
+          <div class="tiles" style="grid-template-columns:repeat(6,1fr)">
+            <div class="tile"><div class="k">Repositories</div><div class="v">4</div></div>
+            <div class="tile"><div class="k">Ready</div><div class="v">3</div></div>
+            <div class="tile"><div class="k">Last sync</div><div class="v">6m<small>ago</small></div></div>
+            <div class="tile"><div class="k">On disk</div><div class="v">1.9<small>GB</small></div></div>
+            <div class="tile rongo"><div class="k">Chunks</div><div class="v">19 240</div></div>
+            <div class="tile rongo"><div class="k">Last index</div><div class="v">6m<small>ago</small></div></div>
+          </div>
+          <table class="tbl">
+            <thead><tr><th>Repository</th><th>Branch</th><th>Head</th><th>State</th><th>Last sync</th><th>Description</th><th class="rongo">Index</th><th></th></tr></thead>
+            <tbody>
+              <tr><td><span class="name">shop-backend</span><div class="sub mono">https://git.firma.ch/scm/shop/shop-backend.git</div></td><td class="mono">master</td><td class="sha">a3f1c02</td><td><span class="pill ok"><i></i>Ready</span></td><td class="when" style="margin:0">6m</td><td><div>Describing <b>4/7</b></div><div class="sub">at <span class="sha">a3f1c02</span> · $0.62 so far</div></td><td><span class="pill accent">Indexed</span><div class="sub"><span class="sha">a3f1c02</span> · 1 204 files · 9 881 chunks</div></td><td><div class="stack"><button class="btn small">Synchronise</button><button class="btn small" disabled style="opacity:.5">Update</button><button class="btn small">Describe anew</button><button class="btn small">Re-index</button><button class="btn small">Deactivate</button></div></td></tr>
+              <tr><td><span class="name">shop-ui</span><div class="sub mono">https://git.firma.ch/scm/shop/shop-ui.git</div></td><td class="mono">main</td><td class="sha">7bd9e14</td><td><span class="pill ok"><i></i>Ready</span></td><td class="when" style="margin:0">6m</td><td><div>Described</div><div class="sub">at <span class="sha">7bd9e14</span> · rev 6</div></td><td><span class="pill accent">Indexed</span><div class="sub"><span class="sha">7bd9e14</span> · 642 files · 4 117 chunks</div></td><td><div class="stack"><button class="btn small">Synchronise</button><button class="btn small" disabled style="opacity:.5">Update</button><button class="btn small">Describe anew</button><button class="btn small">Re-index</button><button class="btn small">Deactivate</button></div></td></tr>
+              <tr data-state="error"><td><span class="name">shop-events</span><div class="sub mono">https://git.firma.ch/scm/shop/shop-events.git</div><div class="errline">fetch: branch master not found on origin after history rewrite</div></td><td class="mono">master</td><td class="sha">e51b7d3</td><td><span class="pill fail"><i></i>Failed</span></td><td class="when" style="margin:0">28 Oct</td><td><div>Partial</div><div class="sub">at <span class="sha">e51b7d3</span> · 2 parts skipped · read again with the next run</div></td><td><span class="pill ochre">Error</span><div class="sub">frozen at <span class="sha">e51b7d3</span></div></td><td><div class="stack"><button class="btn small">Retry</button><button class="btn small">Update</button><button class="btn small">Re-index</button><button class="btn small">Deactivate</button></div></td></tr>
+              <tr data-state="off"><td><span class="name">shop-admin-legacy</span><div class="sub mono">https://git.firma.ch/scm/shop/shop-admin-legacy.git</div></td><td class="mono">master</td><td class="sha">—</td><td><span class="pill quiet">Deactivated</span></td><td>—</td><td>—</td><td>—</td><td><div class="stack"><button class="btn small">Activate</button><button class="btn small">Remove</button></div></td></tr>
+            </tbody>
+          </table>
+          <p style="margin:8px 0 0;font-size:12px;color:var(--faint)">Dependencies between repositories come from the build manifests Almanach reads after every sync; there is no <code>uses:</code> column. Rongo's search ceiling (the project plus what its repositories use) reads the same edges.</p>
+
+          <div class="callout"><span class="tag">Open decision 6</span><b>Snapshots and parked repositories have no counterpart here.</b><p>Rongo's <code>snapshot: true</code> (an index without a clone) and <code>enabled: false</code> on a whole project map onto nothing in Almanach's sources except Deactivated. Shown above: Deactivated only. A snapshot repository is an open gap.</p></div>
+          </div>
+        </div>
+        </div>
+      </section>
+
+      <!-- ================= QUEUE ================= -->
+      <section data-view="queue" data-title="Queue" data-crumb="">
+        <div class="scroll">
+        <div class="page" style="display:block">
+          <div class="col">
+          <h2>Queue</h2>
+          <p class="lede">One serial worker. Notes fold first, then one step of the oldest open run, then the notes again; index runs of the same repository wait for its run. The queue is the store's, so a restart shows the same list.</p>
+          <div class="tiles">
+            <div class="tile"><div class="k">Now</div><div class="v">1</div></div>
+            <div class="tile"><div class="k">Waiting</div><div class="v">3</div></div>
+            <div class="tile"><div class="k">Spent 24 h</div><div class="v">$4.18</div></div>
+            <div class="tile"><div class="k">Sync</div><div class="v">6m<small>ago</small></div></div>
+            <div class="tile rongo"><div class="k">Index</div><div class="v">1<small>queued</small></div></div>
+          </div>
+          <div class="qlist">
+            <div class="qrow"><span class="slot now">Now</span><span class="pill dim">wiki</span><span class="what">shop-backend · run step 4/7 · Describing <i>Bestellung und Checkout</i><small>started 09:12 · 3 calls · $0.62</small></span><span class="right">2m 41s</span></div>
+            <div class="qrow"><span class="slot">Next</span><span class="pill dim">wiki</span><span class="what">Note SHOP/shop-ui#418 · Cancelled state on the order page<small class="hold">Gateway rate limited · held until 10:42</small></span><span class="right">queued 09:10</span></div>
+            <div class="qrow"><span class="slot">Then</span><span class="pill accent">index</span><span class="what">Re-index shop-backend at a3f1c02<small>waits for the run above; 1 204 files, embeds only what changed</small></span><span class="right">queued 09:08</span></div>
+            <div class="qrow"><span class="slot">Then</span><span class="pill dim">wiki</span><span class="what">shop-events · reconcile at e51b7d3<small>trigger retry · 2 parts left from the last run</small></span><span class="right">due 10 Nov</span></div>
+          </div>
+          <h3 class="sec">Last 24 h</h3>
+          <div class="qlist">
+            <div class="qrow"><span class="slot">09:08</span><span class="pill accent">index</span><span class="what">shop-ui · 7bd9e14 · 12 files changed, 61 chunks embedded</span><span class="right">14s</span></div>
+            <div class="qrow"><span class="slot">08:51</span><span class="pill dim">wiki</span><span class="what">Note SHOP/shop-backend#412 folded · 2 statements edited, 1 added</span><span class="right">$0.19 · 48s</span></div>
+            <div class="qrow"><span class="slot">yest.</span><span class="pill dim">wiki</span><span class="what">billing-core · full run · 9 steps · map drawn</span><span class="right">$2.87 · 11m</span></div>
+          </div>
+          <div class="callout"><span class="tag">Note</span><b>Two workers today, one list here.</b><p>Rongo's indexer and Almanach's consolidation worker are both single and serial. The mock lists them together with a kind pill; whether they become one worker is a backend question, the view does not depend on it.</p></div>
+          </div>
+        </div>
+        </div>
+      </section>
+
+      <!-- ================= DEPENDENCIES ================= -->
+      <section data-view="deps" data-title="Dependencies" data-crumb="">
+        <div class="scroll">
+        <div class="page" style="display:block">
+          <div class="col">
+          <h2>Dependencies</h2>
+          <p class="lede">Which repositories of the sources use which others. Read from the build manifests after every sync; code draws the edges, no model. Every repository is cloned and described once, however many use it.</p>
+          <div class="map" style="margin-top:18px">
+            <div class="band"><div class="z">Users</div><div class="boxes">
+              <div class="box" data-to="payments-client:out:library"><div class="nn">shop-backend</div><div class="nd">SHOP</div></div>
+              <div class="box" data-to="payments-client:out:library,pdf-kit:out:library"><div class="nn">billing-core</div><div class="nd">BILLING</div></div>
+              <div class="box" data-to="pdf-kit:out:library"><div class="nn">invoice-pdf</div><div class="nd">BILLING</div></div>
+            </div></div>
+            <div class="band"><div class="z">Used</div><div class="boxes">
+              <div class="box shared" data-id="payments-client"><div class="nn">payments-client</div><div class="nd">SHOP · used by 2</div></div>
+              <div class="box shared" data-id="pdf-kit"><div class="nn">pdf-kit</div><div class="nd">BILLING · used by 2</div></div>
+            </div></div>
+          </div>
+          <table class="tbl" style="margin-top:18px">
+            <thead><tr><th>Repository</th><th>Used by</th><th>Version</th></tr></thead>
+            <tbody>
+              <tr class="row"><td class="name">payments-client</td><td class="mono">shop-backend · billing-core</td><td class="mono">v2.3.0 · <span class="ochre" title="Another version than the other users">v2.1.4</span></td></tr>
+              <tr class="row"><td class="name">pdf-kit</td><td class="mono">billing-core · invoice-pdf</td><td class="mono">v1.8.0</td></tr>
+              <tr><td class="name">http-common</td><td><span class="pill ochre">Ambiguous</span><span class="when">provided by two repositories (a fork); no edge to either</span></td><td class="mono">—</td></tr>
+            </tbody>
+          </table>
+          <p style="margin:8px 0 0;font-size:12px;color:var(--faint)">Rongo's search scope for a question is the chosen project plus what its repositories use. Today that comes from <code>uses:</code> in repos.yaml; here it reads these edges.</p>
+          </div>
+        </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+</template>
+
+<!-- ================= stage ================= -->
+<div id="stage" data-mode="a"></div>
+
+<div class="mockbar">
+  <span class="lbl">Shell</span>
+  <div class="grp" data-shells><button data-shell="a" aria-pressed="true">A · Rongo hosts</button><button data-shell="b">B · Almanach hosts</button><button data-shell="compare">Compare</button></div>
+  <span class="lbl" style="margin-left:10px">Page</span>
+  <div class="grp" data-pages><button data-page="ask" aria-pressed="true">Ask</button><button data-page="project">Project</button><button data-page="repo">Repository</button><button data-page="sources">Sources</button><button data-page="queue">Queue</button><button data-page="deps">Dependencies</button></div>
+  <span class="hint" data-hint></span>
+</div>
+
+<script>
+  const tpl = document.getElementById('app-tpl');
+  const stage = document.getElementById('stage');
+  let shell = 'a', page = 'ask';
+  const hints = {
+    a: 'A: Rongo’s rail hosts everything; on wiki pages it turns into the content rail. Cost: the wiki reads as a section of a chat app.',
+    b: 'B: Almanach’s top nav hosts everything; the thread rail exists only under Ask. Cost: Ask one click deeper, the rail flips in and out.',
+    compare: 'Same page, both shells, A above B. Scroll inside each frame.'
+  };
+
+  function build(sh) {
+    const app = tpl.content.firstElementChild.cloneNode(true);
+    app.dataset.shell = sh; app.dataset.page = page;
+    const sec = app.querySelector(`section[data-view="${page}"]`);
+    // current page markers
+    app.querySelectorAll('[data-go]').forEach(b => { const cur = b.dataset.go === (page === 'repo' ? 'project' : page); if (cur) b.setAttribute('aria-current', 'page'); });
+    app.querySelectorAll('section[data-view]').forEach(s => s.hidden = s !== sec);
+    // crumb (shell A)
+    const crumb = app.querySelector('[data-crumb]');
+    const pre = sec.dataset.crumb;
+    crumb.innerHTML = (pre ? pre.split(' / ').map(p => `<span>${p}</span><span class="sep">/</span>`).join('') : '') + `<b>${sec.dataset.title}</b>` + (page === 'ask' ? '<span class="pill accent">Analyst</span><span class="pill dim">3 turns</span><span class="pill dim">shop</span>' : '');
+    // content rail: template inside the section → rail slot (A) or crail-b (B)
+    const ct = sec.querySelector('template.crail');
+    if (ct) {
+      const node = ct.content.firstElementChild.cloneNode(true);
+      if (sh === 'a') app.querySelector('.crail-slot').appendChild(node); else sec.querySelector('.crail-b').appendChild(node);
+    }
+    wire(app);
+    const frame = document.createElement('div'); frame.className = 'frame';
+    frame.innerHTML = `<div class="ftitle">Shell <b>${sh.toUpperCase()}</b> · ${sh === 'a' ? 'Rongo hosts' : 'Almanach hosts'} · ${sec.dataset.title}</div>`;
+    frame.appendChild(app);
+    return frame;
+  }
+
+  function render() {
+    stage.dataset.mode = shell;
+    stage.innerHTML = '';
+    if (shell === 'compare') { stage.appendChild(build('a')); stage.appendChild(build('b')); }
+    else stage.appendChild(build(shell));
+    document.querySelector('[data-hint]').textContent = hints[shell];
+    document.querySelectorAll('[data-shells] button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.shell === shell)));
+    document.querySelectorAll('[data-pages] button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.page === page)));
+  }
+
+  function wire(app) {
+    app.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => { page = b.dataset.go; render(); }));
+    app.querySelectorAll('.clar > button').forEach(b => b.addEventListener('click', () => {
+      const open = b.getAttribute('aria-expanded') === 'true';
+      b.setAttribute('aria-expanded', String(!open));
+      const list = b.nextElementSibling; if (list) list.hidden = open;
+    }));
+    // compact map: light connections of the box pointed at
+    app.querySelectorAll('.map').forEach(map => {
+      const conn = map.querySelector('[data-conn]');
+      const byId = id => map.querySelector(`[data-id="${id}"]`);
+      const names = { gw: 'API-Gateway', pg: 'PostgreSQL shop', kafka: 'Kafka orders.*', psp: 'Zahlungsdienst (PSP)', 'payments-client': 'payments-client', 'shop-backend': 'shop-backend', 'pdf-kit': 'pdf-kit' };
+      const ways = { out: '→', in: '←', both: '↔' };
+      map.querySelectorAll('.box[data-to]').forEach(box => {
+        const light = on => {
+          map.querySelectorAll('.lit, .focus').forEach(x => x.classList.remove('lit', 'focus'));
+          if (!on) { map.classList.remove('dim'); return; }
+          map.classList.add('dim'); box.classList.add('focus');
+          const parts = [];
+          box.dataset.to.split(',').forEach(e => { const [id, way, kind] = e.split(':'); const t = byId(id); if (t) t.classList.add('lit'); parts.push(`<b>${names[id] || id}</b><span class="w">${ways[way]}</span>${kind}`); });
+          if (conn) conn.innerHTML = `${box.querySelector('.nn').textContent}: connected with ` + parts.join(', ');
+        };
+        box.addEventListener('mouseenter', () => light(true));
+        box.addEventListener('focus', () => light(true));
+        box.addEventListener('mouseleave', () => light(false));
+      });
+    });
+    // the project map starts with shop-backend lit (as the static text says)
+    const first = app.querySelector('[data-map] .box.focus');
+    if (first) { first.dispatchEvent(new Event('mouseenter')); }
+  }
+
+  document.querySelectorAll('[data-shells] button').forEach(b => b.addEventListener('click', () => { shell = b.dataset.shell; render(); }));
+  document.querySelectorAll('[data-pages] button').forEach(b => b.addEventListener('click', () => { page = b.dataset.page; render(); }));
+  render();
+</script>
