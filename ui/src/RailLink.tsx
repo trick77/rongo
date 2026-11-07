@@ -31,7 +31,9 @@ export function RailLink({
       className={
         railRow +
         " " +
-        (current ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover") +
+        // Selected keeps the rail color: loom's nav entries mark the page with
+        // the background alone. Only its thread rows turn white (Threads.tsx).
+        (current ? "bg-rail-sel text-rail" : "text-rail hover:bg-rail-hover") +
         (extra ? " " + extra : "")
       }
     >
