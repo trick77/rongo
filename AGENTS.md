@@ -11,6 +11,7 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 - Fresh clone: `ship hooks` before the first push (check, conform and init install it too); without the pre-push hook a push skips the gate.
 - Commit subjects + PR titles: Go style `area: what`, gated by ship; release notes list them by area.
 - New config → `BACKEND_*` env var, nowhere else. Malformed value refuses to start; empty means the default.
+- Database: read `docs/schema.md` first. `TestSchemaDoc` fails on a migration or a model.go type/`Table:` change (not a field change); regenerate in `backend/`: `SCHEMADOC_UPDATE=1 go test ./internal/store -run TestSchemaDoc`.
 
 ## Locked choices (no change without agreement)
 - Pure-Go SQLite: `ncruces/go-sqlite3` + `asg017/sqlite-vec-go-bindings/ncruces` (wasm) + FTS5. One unit: bump both or neither, by hand (`ship.yaml` says why). Same pair as peeq/loom.

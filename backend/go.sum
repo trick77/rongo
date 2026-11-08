@@ -10,8 +10,8 @@ github.com/ncruces/julianday v1.0.0 h1:fH0OKwa7NWvniGQtxdJRxAgkBMolni2BjDHaWTxqt
 github.com/ncruces/julianday v1.0.0/go.mod h1:Dusn2KvZrrovOMJuOt0TNXL6tB7U2E8kvza5fFc9G7g=
 github.com/tetratelabs/wazero v1.12.0 h1:DuWcpNu/FzgEXgGBDp8J1Spc+CWOvvtvVyjKlaZopYU=
 github.com/tetratelabs/wazero v1.12.0/go.mod h1:LvKtzl2RqO4gyF27BiXU+nKAjcV8f38U+kP/q2vgxh0=
-github.com/trick77/ship/kit v0.18.0 h1:lrn7wvL+/ErzgHRIs0FoQSnA1hfN2/6zt3+k08O6Z/0=
-github.com/trick77/ship/kit v0.18.0/go.mod h1:cE+kQhN2nb5j2ML174YKdGrC41M2GxnILzQLqFupsHE=
+github.com/trick77/ship/kit v0.19.0 h1:zGNSIi6AstJ2DXtXWj2YQB3OFJrw4peohSFErnZi0Pc=
+github.com/trick77/ship/kit v0.19.0/go.mod h1:cE+kQhN2nb5j2ML174YKdGrC41M2GxnILzQLqFupsHE=
 github.com/trick77/ship/kit/auth v0.4.0 h1:42pePWEtaNqnZZkHpxHt67LevU8Ez/GRwM7NnaQu6M0=
 github.com/trick77/ship/kit/auth v0.4.0/go.mod h1:9m98UxKfoFe8k11UIuQm/UvqdLGU4T4Sr1+gPig3PHo=
 github.com/trick77/toolkit v0.3.0 h1:HIqse9B3F1++uWPIC2hsygPUN2LkxI4ReWHq6L/igIY=
