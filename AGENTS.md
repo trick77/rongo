@@ -59,7 +59,7 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 - **Log durations as `.String()`** — a `time.Duration` attr reads the same under every handler only as a string.
 
 ## UI
-- Warm Editorial dark; same `@theme` and fonts as ../loom and ../peeq. Reference: `docs/plans/rongo-ui-mock.html`.
+- Warm Editorial dark; same `@theme` and fonts as ../loom and ../peeq.
 - Expandable → chevron, rotates 90° on open, **toward what it opened**. No triangle, plus/minus, glyph swap.
 - Ochre means "your move" — a waiting clarification, not the Done check. Once decided it loses the colour.
 - **German is Swiss by string function, never prompt** (`swiss.go`). A prompt note asking for the same spelling was measured and moved nothing — do not add one back.

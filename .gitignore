@@ -70,9 +70,7 @@ playwright-report/
 .playwright-mcp/
 
 # ---------- Deliverables written for reading, not for the repo ----------
-# A few design documents under docs/plans/ are deliberately force-added
-# (`git add -f`) and tracked despite this rule — keep the rule; a new document
-# meant to be kept needs the same `git add -f`.
+# Plans and specs stay local, never committed.
 docs/plans/
 
 # ---------- Stray images at the repo root ----------
