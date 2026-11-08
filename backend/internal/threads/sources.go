@@ -74,15 +74,6 @@ func saveSourcesTx(ctx context.Context, tx *sql.Tx, messageID int64, sources []a
 	return nil
 }
 
-// recorded is one message_sources row as stored.
-type recorded struct {
-	chunkID, commitID int64
-	repo, path, sha   string
-	start, end        int
-	symbol, reason    string
-	hop               int
-}
-
 // records reads a message's rows, chunks by hop then id, commits after.
 // A message that does not belong to a thread owned by subject has none.
 func (s *Store) records(ctx context.Context, subject string, messageID int64) ([]recorded, error) {

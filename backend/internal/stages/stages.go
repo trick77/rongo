@@ -19,14 +19,6 @@ import (
 	"github.com/trick77/rongo/internal/repos"
 )
 
-// Stage is one declared stage of one repository.
-type Stage struct {
-	Repo    string
-	Name    string
-	Prefix  string
-	Aliases []string
-}
-
 // Set is every declared stage of every enabled repository.
 type Set []Stage
 

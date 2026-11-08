@@ -20,12 +20,6 @@ type Models interface {
 	ReadModel(ctx context.Context, repo, path, sha string) ([]byte, error)
 }
 
-// ModelRef is one process model file the index carries.
-type ModelRef struct {
-	Path string
-	SHA  string
-}
-
 // maxProcessChars caps the listing. A model with fifty nodes renders in about
 // three thousand characters; the cap holds the flagship process, its called
 // sub-processes and one more before it stops, which is what a trace question

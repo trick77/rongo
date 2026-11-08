@@ -38,16 +38,6 @@ var ErrVersionUnknown = errors.New("version not found")
 // returns — a database error — still fails the turn.
 var ErrGitState = errors.New("git state could not be determined")
 
-// RepoHead is what the release turn needs to know about a repository's
-// checkout: the commit the index was built from, the commit the remote
-// branch is at, and whether the entry is a snapshot, which has no tags.
-type RepoHead struct {
-	SHA      string
-	Remote   string
-	Branch   string
-	Snapshot bool
-}
-
 // Releaser is the checkout side of a release turn. An interface for the
 // reason Histories is: a test drives every line of the matrix without git.
 type Releaser interface {

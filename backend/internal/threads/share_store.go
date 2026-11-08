@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/sqlutil"
@@ -22,30 +21,6 @@ var ErrNoShare = errors.New("no such share")
 // shareable — the link freezes below the one in flight rather than refusing,
 // so a row left unfinished by a crash can never lock a thread out of sharing.
 var ErrUnfinished = errors.New("nothing finished to share yet")
-
-// Share is one thread readable by anyone holding the link.
-type Share struct {
-	Token string `json:"token"`
-	// The path, never an absolute URL: the browser puts its own origin in
-	// front. A rongo behind a TLS-terminating proxy only ever sees plain HTTP
-	// and would build the wrong one.
-	Path string `json:"path"`
-	// ThreadPublicID is the shared thread's own address, so the Shared page can
-	// link back to it. Not the row number, and not the token either: the token
-	// opens the public page, this opens the owner's thread.
-	ThreadPublicID string `json:"thread_id"`
-	// threadID is the row it all hangs off, unexported: the public read below
-	// needs it to fetch the messages, and nothing outside this package has any
-	// business with a row number.
-	threadID int64
-	Title    string `json:"title"`
-	// The ceiling. Turns above it are on the record but not on the link.
-	UpToMessageID int64     `json:"up_to_message_id"`
-	Turns         int       `json:"turns"`
-	Newer         int       `json:"newer"`
-	SharedAt      time.Time `json:"shared_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
 
 // SharePath is where a share link lives. The SPA reads it out of
 // window.location, and backend/web serves index.html for it like any other

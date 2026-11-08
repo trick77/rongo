@@ -9,7 +9,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -19,46 +18,8 @@ import (
 	"github.com/trick77/rongo/internal/sqlutil"
 )
 
-// Source is one piece of code the answer may be built on, and the reason it is
-// here. The reason is not decoration: it is what lets an answer say "this file
-// came in because grant.go calls NewGrant" instead of presenting twenty files
-// as equally relevant.
-type Source struct {
-	ChunkID   int64
-	Repo      string
-	Branch    string
-	Path      string
-	Symbol    string
-	StartLine int
-	EndLine   int
-	// SHA is the commit the file was indexed at; see retrieve.Hit.SHA.
-	SHA  string
-	Text string
-	// Reason is "hit" for something the search returned,
-	// "reference:<symbol>" for something a symbol hop reached, or
-	// "edge:<kind> <value> from <repo>/<path>" for something reached across a
-	// repository boundary on a shared queue name or route.
-	Reason string
-	// Hop is 0 for a search hit and counts up from there.
-	Hop int
-	// Kind is "" for a chunk of a file and SourceCommit for an entry of the
-	// commit lane, where SHA is the commit itself, Path and the lines are
-	// empty, Text is the message body, and the fields below are set.
-	Kind string
-	// CommitID is the commits row, the way ChunkID is the chunks row; it is
-	// what the record stores so a re-explain can read the commit back.
-	CommitID    int64
-	Subject     string
-	CommittedAt time.Time
-	// Paths are the files the commit changed.
-	Paths []string
-}
-
 // SourceCommit is Source.Kind for a commit of the lane.
 const SourceCommit = "commit"
-
-// IsCommit reports whether the source is a commit rather than a chunk.
-func (s Source) IsCommit() bool { return s.Kind == SourceCommit }
 
 // maxDefiners is how many files may define a name before following it is
 // pointless. The value and its measurement live in internal/edges, which
