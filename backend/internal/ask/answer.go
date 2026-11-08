@@ -78,30 +78,6 @@ func languageName(lang Language) string {
 // TestAnswerCap_fitsTheDefaultTimeoutOnEveryModel).
 const answerMaxTokens = 16384
 
-// Citation is one entry of the evidence panel. The branch travels with it
-// because a forge URL without one may 404 off the default branch. The SHA is
-// the commit the cited file was indexed at: the source viewer reads the file
-// at that commit, so the cited lines are the lines the answer was written
-// from even after the branch has moved on.
-//
-// A commit citation (Kind = SourceCommit) cites a change rather than lines:
-// SHA is the commit, Path and the lines are empty, and Subject and
-// CommittedAt are what the chip shows. It opens in the commit view, never in
-// the file viewer.
-type Citation struct {
-	Marker    int    `json:"marker"`
-	Repo      string `json:"repo"`
-	Branch    string `json:"branch"`
-	Path      string `json:"path"`
-	StartLine int    `json:"start_line"`
-	EndLine   int    `json:"end_line"`
-	SHA       string `json:"sha"`
-	Kind      string `json:"kind,omitempty"`
-	Subject   string `json:"subject,omitempty"`
-	// CommittedAt is RFC 3339 in UTC; empty for a file citation.
-	CommittedAt string `json:"committed_at,omitempty"`
-}
-
 // Answer is one finished turn.
 type Answer struct {
 	Text      string

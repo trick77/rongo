@@ -36,14 +36,6 @@ func NewSessions(key []byte, secure bool, adminGroup string) (*kitauth.Sessions,
 	})
 }
 
-// User is an authenticated identity.
-type User struct {
-	ID      int64
-	Subject string
-	Email   string
-	IsAdmin bool
-}
-
 // Service owns users and admits requests.
 type Service struct {
 	db         *sql.DB

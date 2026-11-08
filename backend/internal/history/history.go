@@ -160,19 +160,6 @@ type Query struct {
 	Limit int
 }
 
-// Commit is one search result. Author is deliberately not here.
-type Commit struct {
-	// ID is the commits row, what a turn's record stores.
-	ID          int64
-	Repo        string
-	Branch      string
-	SHA         string
-	CommittedAt time.Time
-	Subject     string
-	Body        string
-	Paths       []string
-}
-
 // Search lists the commits of the window. With a topic the keyword lane's
 // widest rung (content words as prefixes, ORed) filters the window and
 // bm25 orders it; without one the window is listed newest first. Either

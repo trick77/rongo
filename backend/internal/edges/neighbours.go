@@ -5,16 +5,6 @@ import (
 	"database/sql"
 )
 
-// Neighbour is a file on the far side of an integration edge: it names the same
-// queue or route as the file asked about, and lives in a DIFFERENT repository.
-type Neighbour struct {
-	Repo  string
-	Path  string
-	Kind  Kind
-	Value string
-	Line  int
-}
-
 // spreadCeiling is how many repositories may share a token before it stops
 // counting as an edge. A value present in five of eight repositories is a
 // convention, not a link — "/orders" in a corpus of order services would still
