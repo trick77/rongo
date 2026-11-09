@@ -225,6 +225,21 @@ type Share struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+// Feedback is the reader's verdict on a thread. It is kept for reading later
+// and nothing else: no prompt, memory block or shared page ever sees it.
+//
+// Table: thread_feedback
+type Feedback struct {
+	// Verdict is 1 for helpful, -1 for not.
+	Verdict int `json:"verdict"`
+	// Reason is one of feedbackReasons; empty when none was given.
+	Reason string `json:"reason"`
+	// UpToMessageID is the newest finished answer the verdict covered. Turns
+	// asked after it are not part of the verdict until the reader gives it
+	// again.
+	UpToMessageID int64 `json:"upToMessageId"`
+}
+
 // recorded is one message_sources row as stored.
 //
 // Table: message_sources
