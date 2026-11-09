@@ -2272,6 +2272,11 @@ describe("Ask, following the answer", () => {
     rerender(<Ask threadId="7" onThread={() => {}} />);
     await screen.findByText(/Through a grant/);
 
+    // The record lands from a fetch outside act: findByText sees the commit,
+    // the effect that scrolls to the top runs a scheduler task later.
+    await waitFor(() => expect(view.scrollTop).toBe(0));
+    // And stays there once every pending effect has run: never at the foot.
+    await act(async () => {});
     expect(view.scrollTop).toBe(0);
   });
 
@@ -2281,9 +2286,10 @@ describe("Ask, following the answer", () => {
       <Ask threadId={null} onThread={() => {}} />,
     );
     const view = scroller(container);
+    view.scrollTop = 1500; // off the top, so reaching 0 is the opened thread's doing
     rerender(<Ask threadId="7" onThread={() => {}} />);
     await screen.findByText(/Through a grant/);
-    expect(view.scrollTop).toBe(0);
+    await waitFor(() => expect(view.scrollTop).toBe(0)); // the scroll effect runs after the commit
 
     await askInto(container);
     await stream.push(ev("token", { text: "Shipping runs through a job." }));
