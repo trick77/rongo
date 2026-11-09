@@ -45,6 +45,7 @@ Virtual table: `vec0(embedding float[1536])`.
 
 | Column | Type | Null | Default | PK |
 | --- | --- | --- | --- | --- |
+| `rowid` | INTEGER | no |  | 1 |
 | `embedding` |  | yes |  |  |
 
 ## citations
@@ -635,6 +636,7 @@ erDiagram
         ANY raw_text
     }
     chunks_vec {
+        INTEGER rowid PK
         ANY embedding
     }
     citations {
@@ -863,7 +865,7 @@ erDiagram
     chunks }o--|| files : "file_id"
     citations }o--|| messages : "message_id"
     clarification_candidates }o--|| clarifications : "clarification_id"
-    clarifications }o--|| messages : "message_id"
+    clarifications |o--|| messages : "message_id"
     commits }o--|| repo_state : "repo"
     files }o--|| repo_state : "repo"
     integration_tokens }o--|| files : "file_id"
@@ -878,9 +880,9 @@ erDiagram
     repo_stages }o--|| repo_state : "repo"
     repo_uses }o--|| repo_state : "repo"
     shared_threads }o--|| users : "user_subject"
-    shared_threads }o--|| threads : "thread_id"
+    shared_threads |o--|| threads : "thread_id"
     symbols }o--|| files : "file_id"
     thread_feedback }o--|| messages : "up_to_message_id"
-    thread_feedback }o--|| threads : "thread_id"
+    thread_feedback |o--|| threads : "thread_id"
     threads }o--|| users : "user_subject"
 ```
