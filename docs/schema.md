@@ -37,6 +37,7 @@ Virtual table: `fts5(raw_text)`.
 
 | Column | Type | Null | Default | PK |
 | --- | --- | --- | --- | --- |
+| `rowid` | INTEGER | no |  | 1 |
 | `raw_text` |  | yes |  |  |
 
 ## chunks_vec
@@ -157,6 +158,7 @@ Virtual table: `fts5(subject, body, paths)`.
 
 | Column | Type | Null | Default | PK |
 | --- | --- | --- | --- | --- |
+| `rowid` | INTEGER | no |  | 1 |
 | `subject` |  | yes |  |  |
 | `body` |  | yes |  |  |
 | `paths` |  | yes |  |  |
@@ -253,6 +255,7 @@ Virtual table: `fts5(thread_id UNINDEXED, question, answer, tokenize = 'unicode6
 
 | Column | Type | Null | Default | PK |
 | --- | --- | --- | --- | --- |
+| `rowid` | INTEGER | no |  | 1 |
 | `thread_id` |  | yes |  |  |
 | `question` |  | yes |  |  |
 | `answer` |  | yes |  |  |
@@ -519,6 +522,7 @@ Virtual table: `fts5(title, tokenize = 'unicode61 remove_diacritics 2')`.
 
 | Column | Type | Null | Default | PK |
 | --- | --- | --- | --- | --- |
+| `rowid` | INTEGER | no |  | 1 |
 | `title` |  | yes |  |  |
 
 ## threads
@@ -633,6 +637,7 @@ erDiagram
         TEXT content_hash
     }
     chunks_fts {
+        INTEGER rowid PK
         ANY raw_text
     }
     chunks_vec {
@@ -682,6 +687,7 @@ erDiagram
         TEXT paths
     }
     commits_fts {
+        INTEGER rowid PK
         ANY subject
         ANY body
         ANY paths
@@ -719,6 +725,7 @@ erDiagram
         TEXT created_at
     }
     message_fts {
+        INTEGER rowid PK
         ANY thread_id
         ANY question
         ANY answer
@@ -831,6 +838,7 @@ erDiagram
         TEXT updated_at
     }
     thread_fts {
+        INTEGER rowid PK
         ANY title
     }
     threads {
