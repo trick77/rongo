@@ -3,7 +3,8 @@
 Numbers: `docs/measurements/`; bullet cites one → read it before overturning.
 
 ## Conventions
-- English: docs, comments, UI copy, prompts, answers.
+- English: docs, comments, UI copy, prompts, answers (maintainer talks German).
+- Feature branch per phase; never commit to master.
 - TDD: failing test first, then smallest implementation.
 - No test hits a real LLM, embeddings endpoint or git remote: `httptest` fakes, local fixture repo.
 - Gate = ship (`make check`, pre-push hook): coverage 75% both sides + changed lines. `ship init` files: fix in ship, never here.
