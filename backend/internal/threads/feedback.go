@@ -7,19 +7,6 @@ import (
 	"github.com/trick77/rongo/internal/sqlutil"
 )
 
-// Feedback is the reader's verdict on a thread. It is kept for reading later
-// and nothing else: no prompt, memory block or shared page ever sees it.
-type Feedback struct {
-	// Verdict is 1 for helpful, -1 for not.
-	Verdict int `json:"verdict"`
-	// Reason is one of feedbackReasons; empty when none was given.
-	Reason string `json:"reason"`
-	// UpToMessageID is the newest finished answer the verdict covered. Turns
-	// asked after it are not part of the verdict until the reader gives it
-	// again.
-	UpToMessageID int64 `json:"upToMessageId"`
-}
-
 // feedbackReasons is the closed set the schema's CHECK holds too.
 var feedbackReasons = map[string]bool{
 	"": true, "wrong": true, "incomplete": true, "missed_code": true, "too_long": true, "wrong_repo": true,

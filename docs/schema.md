@@ -490,6 +490,10 @@ Indexes:
 
 ## thread_feedback
 
+Go types:
+
+- `threads.Feedback` (internal/threads): Feedback is the reader's verdict on a thread. It is kept for reading later and nothing else: no prompt, memory block or shared page ever sees it.
+
 | Column | Type | Null | Default | PK |
 | --- | --- | --- | --- | --- |
 | `thread_id` | INTEGER | no |  | 1 |
