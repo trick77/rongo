@@ -546,28 +546,6 @@ func TestSelectBody_secretDetectionBeatsExcluded(t *testing.T) {
 	}
 }
 
-func TestValidateExclude(t *testing.T) {
-	// A malformed pattern must fail at startup: silently matching nothing
-	// would leave the excluded content in the index while the configuration
-	// looked right.
-	if err := ValidateExclude([]string{"docs/plans/**", "**/*.html"}); err != nil {
-		t.Errorf("ValidateExclude(valid) err = %v, want nil", err)
-	}
-	if err := ValidateExclude([]string{"docs/[plans/**"}); err == nil {
-		t.Error("ValidateExclude(unclosed bracket) err = nil, want an error")
-	}
-	if err := ValidateExclude([]string{""}); err == nil {
-		t.Error("ValidateExclude(empty pattern) err = nil, want an error")
-	}
-	// Paths are cleaned before matching, so these could never match anything
-	// and would fail silently instead of loudly.
-	for _, pat := range []string{"docs/plans/", "/docs/plans/**", "./docs/plans/**", "docs//plans/**", "../docs/**", "docs/**.html"} {
-		if err := ValidateExclude([]string{pat}); err == nil {
-			t.Errorf("ValidateExclude(%q) err = nil, want an error for a pattern that can never match", pat)
-		}
-	}
-}
-
 func TestSelectBody_secretDetectionBeatsEveryOtherSkip(t *testing.T) {
 	// Given: a vendored file that also contains a credential. The vendored
 	// verdict alone would be harmless, but the ORDER matters for a different

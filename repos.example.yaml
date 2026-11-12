@@ -196,6 +196,22 @@ projects:
   #      # commits between them are the release notes. Declared, never
   #      # guessed from the name; one image per repository inside a project.
   #      image: registry.example.invalid/acme/shop-backend
+  #      # index is optional, on any entry, libraries too. exclude takes
+  #      # BACKEND_INDEX_EXCLUDE's globs, for this repository only, on top
+  #      # of the global list. latest names version directories: of the
+  #      # ones a glob matches under one parent, only the highest name is
+  #      # indexed, the rest count as excluded. Digit runs compare as
+  #      # numbers (2027 > 2026, V10 > V9), the rest byte by byte. Here
+  #      # seed/2027_V9005/ alone of 2023_V9001/ .. 2027_V9005/; a new
+  #      # 2028_* retires it on the next run, no edit. inyear_V1234/ does
+  #      # not match and stays. A latest glob must match version folders
+  #      # only: letters sort above digits, so seed/* would make a sibling
+  #      # common/ the newest and drop every year. Changes apply at the
+  #      # next start. Quote a glob that holds [ or starts with *:
+  #      # unquoted, the file does not parse.
+  #      index:
+  #        exclude: [docs/drafts/**]
+  #        latest: ["seed/[0-9][0-9][0-9][0-9]_*"]
   #    - name: shop-search
   #      clone_url: https://forge.example.invalid/acme/shop-search.git
   #      token_env: BACKEND_FORGE_TOKEN

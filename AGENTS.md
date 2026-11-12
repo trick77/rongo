@@ -10,7 +10,7 @@ Numbers: `docs/measurements/`; bullet cites one → read it before overturning.
 - Gate = ship (`make check`, pre-push hook): coverage 75% both sides + changed lines. `ship init` files: fix in ship, never here.
 - Fresh clone: `ship hooks` before the first push (check, conform and init install it too); without the pre-push hook a push skips the gate.
 - Commit subjects + PR titles: Go style `area: what`, gated by ship; release notes list them by area.
-- New config → `BACKEND_*` env var, nowhere else. Malformed refuses to start; empty = default.
+- Env config: malformed refuses to start; empty = default.
 - Database: read `docs/schema.md` first; regenerate per its header. `TestSchemaDoc` fails on migrations, model.go struct docs (first paragraph), `Table:` lines, `Table: -` fields; skips table-bound fields, never checks a real column.
 
 ## Locked (change needs agreement)

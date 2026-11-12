@@ -49,31 +49,6 @@ import (
 // included. The family's value.
 const shutdownTimeout = 15 * time.Second
 
-// sweepExcluded applies BACKEND_INDEX_EXCLUDE and the built-in skip rules to
-// every repository's existing index and refreshes the Repos page totals where
-// it removed something.
-func sweepExcluded(ctx context.Context, state *indexer.StateStore, pipeline *indexer.Indexer) {
-	all, err := state.All(ctx)
-	if err != nil {
-		slog.Warn("exclusion sweep skipped; repository list unreadable", "err", err)
-		return
-	}
-	for _, st := range all {
-		changed, counts, err := pipeline.Sweep(ctx, st.Name)
-		if err != nil {
-			slog.Warn("exclusion sweep failed", "repo", st.Name, "err", err)
-			continue
-		}
-		if changed == 0 {
-			continue
-		}
-		if err := state.SetCounts(ctx, st.Name, counts); err != nil {
-			slog.Warn("recording the swept totals failed", "repo", st.Name, "err", err)
-		}
-		slog.Info("skipped files removed from the index", "repo", st.Name, "files", changed)
-	}
-}
-
 // hashPassword reads a password from stdin and prints its bcrypt hash, the
 // value BACKEND_ADMIN_PASSWORD_HASH wants. Stdin, not an argument, so the
 // plaintext never lands in a shell history or a process list.
@@ -114,12 +89,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
 		os.Exit(1)
 	}
-	// The pattern syntax belongs to the indexer, so the check lives there and
-	// config stays a stdlib-only leaf. A malformed pattern fails the boot:
-	// silently matching nothing would keep the excluded content in the index
-	// while the setting looked right.
-	if err := indexer.ValidateExclude(cfg.IndexExclude); err != nil {
-		fmt.Fprintf(os.Stderr, "config: BACKEND_INDEX_EXCLUDE: %v\n", err)
+	// The pattern syntax is internal/pathglob's, shared with repos.yaml, so
+	// the check lives there and config stays a leaf. A malformed pattern
+	// fails the boot: silently matching nothing would keep the excluded
+	// content in the index while the setting looked right.
+	selector, err := indexer.SelectorOf(cfg.IndexSelect())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -245,6 +221,9 @@ func main() {
 	// needs: whether what is in the database came from the file on disk.
 	state := indexer.NewStateStore(db)
 	listLoaded := false
+	// Each repository's index rules, for the pipeline. repos.yaml is read at
+	// start only, so this is the whole of them until the next one.
+	var rules map[string]repos.Index
 	if specs, err := repos.Load(cfg.ReposFile); errors.Is(err, fs.ErrNotExist) {
 		slog.Warn("no repository list; not indexing, and answers come from whatever was indexed before",
 			"path", cfg.ReposFile)
@@ -286,6 +265,7 @@ func main() {
 		if len(purged) > 0 {
 			indexer.PruneEmbedCacheAndLog(ctx, db, slog.Default(), "purged", len(purged))
 		}
+		rules = indexer.RulesOf(specs)
 		listLoaded = true
 	}
 
@@ -315,13 +295,9 @@ func main() {
 		Embedder: embedder,
 		Cache:    embed.NewCache(db, embed.Model, embed.Dim()),
 		Writer:   indexer.NewWriter(db),
-		Selector: indexer.NewSelector(indexer.SelectOptions{
-			MaxBytes:       cfg.IndexMaxFileBytes,
-			MaxDataBytes:   cfg.IndexMaxDataFileBytes,
-			MaxSchemaBytes: cfg.IndexMaxSchemaFileBytes,
-			Exclude:        cfg.IndexExclude,
-		}),
-		Chunk: chunkOptions(cfg),
+		Selector: selector,
+		Rules:    rules,
+		Chunk:    chunkOptions(cfg),
 	})
 
 	// The commit lane: the branch's first-parent history beside the file
@@ -466,7 +442,7 @@ func main() {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			sweepExcluded(pollCtx, state, pipeline)
+			pipeline.SweepAll(pollCtx, state)
 			poller.Run(pollCtx)
 		}()
 	}

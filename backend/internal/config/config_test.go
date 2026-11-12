@@ -239,6 +239,49 @@ func TestLoad_indexExclude(t *testing.T) {
 	}
 }
 
+// LoadIndex is for a caller that indexes without serving: no model, no auth.
+func TestLoadIndex_readsTheSelectionSettingsAlone(t *testing.T) {
+	setEnv(t, map[string]string{
+		"BACKEND_LLM_MODEL":                   "",
+		"BACKEND_INDEX_EXCLUDE":               "a/**",
+		"BACKEND_INDEX_MAX_DATA_FILE_BYTES":   "100",
+		"BACKEND_INDEX_MAX_SCHEMA_FILE_BYTES": "200",
+	})
+
+	cfg, err := LoadIndex()
+
+	if err != nil {
+		t.Fatalf("LoadIndex() err = %v, want nil without a model configured", err)
+	}
+	if len(cfg.IndexExclude) != 1 || cfg.IndexExclude[0] != "a/**" {
+		t.Errorf("IndexExclude = %q, want [a/**]", cfg.IndexExclude)
+	}
+	if cfg.IndexMaxFileBytes != 1<<20 || cfg.IndexMaxDataFileBytes != 100 || cfg.IndexMaxSchemaFileBytes != 200 {
+		t.Errorf("ceilings = %d, %d, %d, want the default, 100, 200",
+			cfg.IndexMaxFileBytes, cfg.IndexMaxDataFileBytes, cfg.IndexMaxSchemaFileBytes)
+	}
+}
+
+// IndexSelect is the one mapping the server and the eval harness hand the
+// selector; a swapped ceiling would size every file against the wrong one.
+func TestIndexSelect_returnsEachSettingInOrder(t *testing.T) {
+	maxFile, maxData, maxSchema, exclude := Config{
+		IndexMaxFileBytes: 1, IndexMaxDataFileBytes: 2, IndexMaxSchemaFileBytes: 3,
+		IndexExclude: []string{"docs/plans/**"},
+	}.IndexSelect()
+	if maxFile != 1 || maxData != 2 || maxSchema != 3 || len(exclude) != 1 || exclude[0] != "docs/plans/**" {
+		t.Errorf("IndexSelect() = %d, %d, %d, %q, want 1, 2, 3, [docs/plans/**]", maxFile, maxData, maxSchema, exclude)
+	}
+}
+
+func TestLoadIndex_refusesAMalformedValue(t *testing.T) {
+	setEnv(t, map[string]string{"BACKEND_INDEX_MAX_FILE_BYTES": "lots"})
+
+	if _, err := LoadIndex(); err == nil || !strings.Contains(err.Error(), "BACKEND_INDEX_MAX_FILE_BYTES") {
+		t.Fatalf("LoadIndex() err = %v, want a refusal naming the variable", err)
+	}
+}
+
 // A list of nothing but separators is neither the default nor "none": read
 // as nil it excluded nothing while looking configured.
 func TestLoad_indexExcludeOfOnlySeparatorsRefusesToStart(t *testing.T) {
