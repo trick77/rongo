@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/trick77/rongo/internal/pathglob"
 )
 
 // Spec is one repository rongo indexes.
@@ -98,6 +100,25 @@ type Spec struct {
 	// tree: which directories are stages and what a reader calls them is
 	// not a fact the files carry. Empty for every ordinary repository.
 	Stages []Stage
+	// Index is what of this repository's tree is kept out of the index, on
+	// top of BACKEND_INDEX_EXCLUDE.
+	Index Index
+}
+
+// Index is a repository's own index rules. A repo fact, like its branch, so it
+// lives on the entry rather than in the global list.
+type Index struct {
+	// Exclude are globs in BACKEND_INDEX_EXCLUDE's syntax, applied to this
+	// repository only, in addition to the global list.
+	Exclude []string
+	// Latest are globs naming version directories. Of the directories one
+	// glob matches under one parent, only the highest name stays indexed;
+	// the others count as excluded. Names compare run by run, digit runs as
+	// numbers (2027 > 2026, V10 > V9), the rest byte by byte. A newer
+	// directory retires the previous one with no edit here. A glob must
+	// match version directories only: a letter sorts above every digit, so a
+	// sibling like common/ it also matched would retire every version.
+	Latest []string
 }
 
 // Stage is one deployment stage of an infrastructure repository: a name the
@@ -152,6 +173,12 @@ type rawSpec struct {
 	Uses        []string   `yaml:"uses"`
 	Image       string     `yaml:"image"`
 	Stages      []rawStage `yaml:"stages"`
+	Index       rawIndex   `yaml:"index"`
+}
+
+type rawIndex struct {
+	Exclude []string `yaml:"exclude"`
+	Latest  []string `yaml:"latest"`
 }
 
 type rawStage struct {
@@ -336,6 +363,9 @@ func loadEntry(r rawSpec, project string, enabled bool) (Spec, error) {
 	if strings.Contains(image, "@") || strings.Contains(image[strings.LastIndex(image, "/")+1:], ":") {
 		return Spec{}, fmt.Errorf("%s: image %q carries a version — declare the name alone, the tag is read per stage from the infrastructure repository", r.Name, image)
 	}
+	if err := validateIndex(r.Name, r.Index); err != nil {
+		return Spec{}, err
+	}
 	return Spec{
 		Name:        r.Name,
 		CloneURL:    strings.TrimSpace(r.CloneURL),
@@ -351,7 +381,32 @@ func loadEntry(r rawSpec, project string, enabled bool) (Spec, error) {
 		Uses:        trimAll(r.Uses),
 		Image:       image,
 		Stages:      stages,
+		Index:       Index{Exclude: r.Index.Exclude, Latest: r.Index.Latest},
 	}, nil
+}
+
+// validateIndex refuses a glob that could never match, as BACKEND_INDEX_EXCLUDE
+// does at boot. Not trimmed: a path may hold a space.
+func validateIndex(repo string, ix rawIndex) error {
+	if err := pathglob.Validate(ix.Exclude); err != nil {
+		return fmt.Errorf("%s: index.exclude: %w", repo, err)
+	}
+	if err := pathglob.Validate(ix.Latest); err != nil {
+		return fmt.Errorf("%s: index.latest: %w", repo, err)
+	}
+	// What the file alone can tell. Whether a matching name is a directory
+	// or a file only the tree says; the indexer warns of a glob that matches
+	// no directory there.
+	for _, pat := range ix.Latest {
+		last := pat[strings.LastIndex(pat, "/")+1:]
+		switch {
+		case last == "**":
+			return fmt.Errorf("%s: index.latest %q names no directory: its last segment matches the version directories and nothing else, as in assets/seed/[0-9][0-9][0-9][0-9]_*", repo, pat)
+		case !strings.ContainsAny(last, "*?["):
+			return fmt.Errorf("%s: index.latest %q has no wildcard in its last segment: it names one directory, which has no sibling to be newer than; write the version pattern, as in assets/seed/[0-9][0-9][0-9][0-9]_*", repo, pat)
+		}
+	}
+	return nil
 }
 
 // stageStopWords are words a stage may not be called or aliased, because a

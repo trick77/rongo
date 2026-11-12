@@ -395,12 +395,15 @@ func TestSweep_removesWhatAnEarlierRunIndexed(t *testing.T) {
 
 	// When
 	cacheBefore := countOf(t, h.db, `SELECT COUNT(*) FROM embed_cache`)
-	changed, counts, err := h.ix.Sweep(context.Background(), "shop")
+	swept := h.ix.SweepAll(context.Background(), h.state)
 
 	// Then
-	if err != nil {
-		t.Fatalf("Sweep() err = %v, want nil", err)
+	if len(swept) != 1 || swept[0].Repo != "shop" {
+		t.Fatalf("SweepAll() = %+v, want shop swept", swept)
 	}
+	changed := swept[0].Retired
+	after := h.stateOf(t)
+	counts := Counts{Files: after.Files, Chunks: after.Chunks}
 	// And the vectors of what was swept are gone from the cache: a boot purge
 	// is one of the two moments the invariant prunes at.
 	if after := countOf(t, h.db, `SELECT COUNT(*) FROM embed_cache`); after >= cacheBefore {
@@ -436,8 +439,8 @@ func TestSweep_removesWhatAnEarlierRunIndexed(t *testing.T) {
 	}
 
 	// And a second sweep finds nothing left to do.
-	if changed, _, err := h.ix.Sweep(context.Background(), "shop"); err != nil || changed != 0 {
-		t.Errorf("second sweep: changed = %d, err = %v, want 0 and nil", changed, err)
+	if again := h.ix.SweepAll(context.Background(), h.state); len(again) != 0 {
+		t.Errorf("second sweep = %+v, want nothing changed", again)
 	}
 }
 

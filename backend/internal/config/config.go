@@ -84,7 +84,8 @@ type Config struct {
 	// patterns are anchored at the repository root. BACKEND_INDEX_EXCLUDE,
 	// comma-separated; unset or empty is the default, "none" excludes nothing.
 	// Already-indexed matches are swept at the next start; removing a pattern
-	// takes effect for a file when it next changes.
+	// requests a full re-index there of every repository it had excluded
+	// files in. A repository adds its own in repos.yaml (`index:`).
 	IndexExclude []string
 	// GitSSHKey and GitSSHKnownHosts are the private key and host-key file git
 	// uses for an ssh remote. Both or neither: the container has no home
@@ -238,23 +239,11 @@ func Load() (Config, error) {
 		DBPath:    r.String("BACKEND_DB_PATH", "./data/rongo.db"),
 		RepoRoot:  r.String("BACKEND_REPO_ROOT", "./repos"),
 		ReposFile: r.String("BACKEND_REPOS_FILE", "./repos.yaml"),
-		// 1 MiB. A source file above that is machine-written or a data blob,
-		// not something a person asks how it works.
-		IndexMaxFileBytes: positive(r, "BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
-		// 8 KiB. The json and xml that answer questions (tsconfig, a small
-		// fixture) stay under 1 KB; a data blob or a translation catalogue
-		// starts at 30 KB. Measured in docs/measurements/2026-09-17-data-file-cap.md.
-		IndexMaxDataFileBytes: positive(r, "BACKEND_INDEX_MAX_DATA_FILE_BYTES", 8<<10),
-		// 256 KiB: the syrius service schemas run to 69 KB; what stays above
-		// is two code tables and one VO catalogue (2026-09-17-data-file-cap.md,
-		// Schemas).
-		IndexMaxSchemaFileBytes: positive(r, "BACKEND_INDEX_MAX_SCHEMA_FILE_BYTES", 256<<10),
 		// 500 commits: a year of a busy repository, bounded for a monorepo's
 		// first run. A "what changed" question looks back a year at most.
 		HistoryDepth:     positive(r, "BACKEND_HISTORY_DEPTH", 500),
 		IndexEnabled:     r.Bool("BACKEND_INDEX_ENABLED", true),
 		IndexComments:    r.Bool("BACKEND_INDEX_COMMENTS", true),
-		IndexExclude:     listOrNone(r, "BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
 		GitSSHKey:        r.String("BACKEND_GIT_SSH_KEY", ""),
 		GitSSHKnownHosts: r.String("BACKEND_GIT_SSH_KNOWN_HOSTS", ""),
 		GitCAFile:        r.String("BACKEND_GIT_CA_FILE", ""),
@@ -290,6 +279,7 @@ func Load() (Config, error) {
 	}
 	cfg.LLMGateTemperature = optionalFloat(r, "BACKEND_LLM_GATE_TEMPERATURE", 0)
 	cfg.LLMTimeout = positiveDuration(r, "BACKEND_LLM_TIMEOUT", DefaultLLMTimeout)
+	readIndex(r, &cfg)
 	if err := r.Err(); err != nil {
 		return Config{}, err
 	}
@@ -444,6 +434,42 @@ var modeBound = []struct {
 	{name: "BACKEND_OIDC_REDIRECT_URL", mode: AuthModeOIDC},
 	{name: "BACKEND_OIDC_ADMIN_GROUP", mode: AuthModeOIDC},
 	{name: "BACKEND_PROXY_ADMIN_GROUP", mode: AuthModeProxy},
+}
+
+// LoadIndex reads only the file-selection settings Load reads, with Load's
+// defaults and refusals: for the eval harness, which indexes the way the
+// server does and configures no model, auth or server.
+func LoadIndex() (Config, error) {
+	r := env.New(os.Getenv)
+	var cfg Config
+	readIndex(r, &cfg)
+	if err := r.Err(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+// IndexSelect is the file-selection settings in indexer.SelectorOf's order,
+// so the server and the eval harness hand them over by one mapping:
+// indexer.SelectorOf(cfg.IndexSelect()).
+func (c Config) IndexSelect() (maxFileBytes, maxDataFileBytes, maxSchemaFileBytes int, exclude []string) {
+	return c.IndexMaxFileBytes, c.IndexMaxDataFileBytes, c.IndexMaxSchemaFileBytes, c.IndexExclude
+}
+
+// readIndex reads the settings that decide which files are indexed.
+func readIndex(r *env.Reader, cfg *Config) {
+	// 1 MiB. A source file above that is machine-written or a data blob,
+	// not something a person asks how it works.
+	cfg.IndexMaxFileBytes = positive(r, "BACKEND_INDEX_MAX_FILE_BYTES", 1<<20)
+	// 8 KiB. The json and xml that answer questions (tsconfig, a small
+	// fixture) stay under 1 KB; a data blob or a translation catalogue
+	// starts at 30 KB. Measured in docs/measurements/2026-09-17-data-file-cap.md.
+	cfg.IndexMaxDataFileBytes = positive(r, "BACKEND_INDEX_MAX_DATA_FILE_BYTES", 8<<10)
+	// 256 KiB: the syrius service schemas run to 69 KB; what stays above
+	// is two code tables and one VO catalogue (2026-09-17-data-file-cap.md,
+	// Schemas).
+	cfg.IndexMaxSchemaFileBytes = positive(r, "BACKEND_INDEX_MAX_SCHEMA_FILE_BYTES", 256<<10)
+	cfg.IndexExclude = listOrNone(r, "BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"})
 }
 
 // cookieSource says where a mode other than password takes the session

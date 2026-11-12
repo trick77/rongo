@@ -31,6 +31,7 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
+	"github.com/trick77/rongo/internal/config"
 	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/indexer"
@@ -255,6 +256,16 @@ func TestEvalIndex(t *testing.T) {
 		t.Fatalf("ctags: %v", err)
 	}
 	gitc := gitrepo.New(gitBin, envOr("BACKEND_REPO_ROOT", "/tmp/rongo-eval-repos"))
+	// The server's selector and rules, so an eval index skips what a
+	// production one skips.
+	cfg, err := config.LoadIndex()
+	if err != nil {
+		t.Fatalf("read the index settings: %v", err)
+	}
+	selector, err := indexer.SelectorOf(cfg.IndexSelect())
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
 	pipeline := indexer.New(indexer.Deps{
 		DB:       db,
 		Git:      gitc,
@@ -262,8 +273,17 @@ func TestEvalIndex(t *testing.T) {
 		Embedder: evalEmbedder(t),
 		Cache:    embed.NewCache(db, embed.Model, dim),
 		Writer:   indexer.NewWriter(db),
+		Selector: selector,
+		Rules:    indexer.RulesOf(specs),
 		Chunk:    evalChunkOptions(),
 	})
+	// The server's start-up sweep: what an earlier run indexed and the rules
+	// now exclude leaves the database before anything is measured. That
+	// changes a corpus numbers may have been measured on, so the log says so.
+	for _, s := range pipeline.SweepAll(ctx, state) {
+		t.Logf("swept   %-12s retired=%d re-included=%d: the corpus changed, numbers measured before are not comparable",
+			s.Repo, s.Retired, s.Reincluded)
+	}
 
 	active, err := state.Active(ctx)
 	if err != nil {
@@ -278,9 +298,14 @@ func TestEvalIndex(t *testing.T) {
 			if err != nil {
 				t.Fatalf("snapshot %s: %v", st.Name, err)
 			}
-			if unchanged {
+			// The sweep asks for a full run where the rules include again
+			// what the index holds as excluded.
+			if unchanged && st.ReindexRequested == 0 {
 				t.Logf("unchanged %-12s sha=%s", st.Name, gitrepo.ShortSHA(head))
 				continue
+			}
+			if st.ReindexRequested > 0 {
+				paths = nil
 			}
 		} else {
 			head = cloneHead(ctx, t, gitc, state, specs, &st)
@@ -291,6 +316,13 @@ func TestEvalIndex(t *testing.T) {
 		}
 		if err := state.MarkIndexed(ctx, st.Name, head, counts); err != nil {
 			t.Fatalf("record %s: %v", st.Name, err)
+		}
+		// A request is served by any run here, clone or snapshot: a clone is
+		// always read whole, and a snapshot with one pending is too (above).
+		if st.ReindexRequested > 0 {
+			if err := state.ClearReindex(ctx, st.Name, st.ReindexRequested); err != nil {
+				t.Fatalf("clear the re-index request of %s: %v", st.Name, err)
+			}
 		}
 		t.Logf("indexed %-12s branch=%-8s files=%-5d chunks=%d", st.Name, st.Branch, counts.Files, counts.Chunks)
 	}

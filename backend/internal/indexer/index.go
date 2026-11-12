@@ -52,8 +52,11 @@ type Deps struct {
 	Cache    VectorCache
 	Writer   *Writer
 	Selector *Selector
-	Chunk    ChunkOptions
-	Logger   *slog.Logger
+	// Rules are each repository's `index:` block, by name (RulesOf), applied
+	// on top of Selector to that repository alone.
+	Rules  map[string]repos.Index
+	Chunk  ChunkOptions
+	Logger *slog.Logger
 }
 
 // Indexer runs the indexing pipeline for one repository at one commit.
@@ -65,6 +68,7 @@ type Indexer struct {
 	cache    VectorCache
 	writer   *Writer
 	selector *Selector
+	rules    map[string]repos.Index
 	chunk    ChunkOptions
 	log      *slog.Logger
 }
@@ -91,7 +95,7 @@ func New(d Deps) *Indexer {
 	}
 	return &Indexer{
 		db: d.DB, git: d.Git, symbols: d.Symbols, embedder: d.Embedder,
-		cache: d.Cache, writer: d.Writer, selector: d.Selector,
+		cache: d.Cache, writer: d.Writer, selector: d.Selector, rules: d.Rules,
 		chunk: d.Chunk, log: d.Logger,
 	}
 }
@@ -110,7 +114,17 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 	if err != nil {
 		return Counts{}, err
 	}
+	run, tree, err := ix.forRun(ctx, spec, st, sha, paths, targets)
+	if err != nil {
+		return Counts{}, err
+	}
+	return run.indexTargets(ctx, spec, st, sha, paths, targets, tree)
+}
 
+// indexTargets is IndexRepo once the targets and the repository's rules are
+// known. tree is the listing at sha when a version directory came or went,
+// and the rows outside targets have to be reconciled; nil otherwise.
+func (ix *Indexer) indexTargets(ctx context.Context, spec repos.Spec, st RepoState, sha string, paths []string, targets, tree []target) (Counts, error) {
 	read, done := ix.reader(ctx, spec)
 	defer done()
 
@@ -147,6 +161,11 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 			continue
 		}
 		if err := ix.indexOne(ctx, spec, st, sha, tg, read); err != nil {
+			return Counts{}, err
+		}
+	}
+	if tree != nil {
+		if err := ix.reconcile(ctx, spec, st, sha, targets, tree, read); err != nil {
 			return Counts{}, err
 		}
 	}
@@ -524,11 +543,12 @@ func (ix *Indexer) vectors(ctx context.Context, chunks []Chunk) ([][]float32, er
 	return out, nil
 }
 
-// Sweep re-applies every path-and-size rule, the operator's exclusion list
-// and the built-in ones alike, to what a repository already holds, recording
-// every indexed file that now matches as skipped with its own reason and
-// clearing its chunks. It returns how many files it changed and the
-// repository's totals afterwards.
+// sweep re-applies every path-and-size rule, the operator's exclusion lists
+// (global and the repository's own, already on ix) and the built-in ones
+// alike, to what a repository already holds, recording every indexed file
+// that now matches as skipped with its own reason and clearing its chunks.
+// It returns how many files it changed and the repository's totals
+// afterwards. SweepAll runs it at start.
 //
 // It exists because nothing else would ever revisit those files: an
 // incremental run only touches the paths a commit changed, and the poller
@@ -538,11 +558,27 @@ func (ix *Indexer) vectors(ctx context.Context, chunks []Chunk) ([][]float32, er
 // the ones already embedded stayed searchable. Verdicts that need the body
 // (secrets, the generated-code marker) are not re-applied: they were
 // already decided on the bytes that were indexed.
-func (ix *Indexer) Sweep(ctx context.Context, repo string) (int, Counts, error) {
+func (ix *Indexer) sweep(ctx context.Context, repo string) (int, Counts, error) {
+	changed, err := ix.retire(ctx, repo)
+	if err != nil || changed == 0 {
+		return 0, Counts{}, err
+	}
+	counts, err := ix.totals(ctx, repo)
+	// The swept chunks' vectors go with them: a boot purge is one of the two
+	// moments the cache is pruned at, and a vector of excluded content kept
+	// here would come back as a hit on the next full index of anything.
+	PruneEmbedCacheAndLog(ctx, ix.db, ix.log, "repo", repo, "reason", "sweep")
+	WarnVectorBloat(ctx, ix.db, ix.log, "repo", repo, "reason", "sweep")
+	return changed, counts, err
+}
+
+// retire records every indexed file of repo the selector now skips as
+// skipped, clearing its chunks, and returns how many it changed.
+func (ix *Indexer) retire(ctx context.Context, repo string) (int, error) {
 	rows, err := ix.db.QueryContext(ctx, `
 		SELECT path, sha, lang, size FROM files WHERE repo = ? AND skip_reason = ''`, repo)
 	if err != nil {
-		return 0, Counts{}, fmt.Errorf("list indexed files of %s: %w", repo, err)
+		return 0, fmt.Errorf("list indexed files of %s: %w", repo, err)
 	}
 	type indexed struct {
 		path, sha, lang string
@@ -554,7 +590,7 @@ func (ix *Indexer) Sweep(ctx context.Context, repo string) (int, Counts, error) 
 		var f indexed
 		if err := rows.Scan(&f.path, &f.sha, &f.lang, &f.size); err != nil {
 			_ = rows.Close()
-			return 0, Counts{}, err
+			return 0, err
 		}
 		if d, _ := ix.selector.selectByPath(f.path, f.size); d != Include {
 			f.why = d
@@ -563,26 +599,17 @@ func (ix *Indexer) Sweep(ctx context.Context, repo string) (int, Counts, error) 
 	}
 	_ = rows.Close()
 	if err := rows.Err(); err != nil {
-		return 0, Counts{}, err
-	}
-	if len(hits) == 0 {
-		return 0, Counts{}, nil
+		return 0, err
 	}
 	for _, f := range hits {
 		if err := ctx.Err(); err != nil {
-			return 0, Counts{}, err
+			return 0, err
 		}
 		if err := ix.writer.RecordSkipped(ctx, repo, f.path, f.sha, f.lang, string(f.why), f.size); err != nil {
-			return 0, Counts{}, err
+			return 0, err
 		}
 	}
-	counts, err := ix.totals(ctx, repo)
-	// The swept chunks' vectors go with them: a boot purge is one of the two
-	// moments the cache is pruned at, and a vector of excluded content kept
-	// here would come back as a hit on the next full index of anything.
-	PruneEmbedCacheAndLog(ctx, ix.db, ix.log, "repo", repo, "reason", "sweep")
-	WarnVectorBloat(ctx, ix.db, ix.log, "repo", repo, "reason", "sweep")
-	return len(hits), counts, err
+	return len(hits), nil
 }
 
 // totals counts what the repository currently holds, for the Repos page.
