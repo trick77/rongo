@@ -1479,6 +1479,13 @@ func reachedVia(reason string) string {
 	if rest, ok := strings.CutPrefix(reason, "gap:"); ok {
 		return "looked up by name after reading the sources: " + rest
 	}
+	// An M/TEXT include: the near side names this file's stem, which is
+	// what the answer may say about why it is here.
+	if rest, ok := strings.CutPrefix(reason, "include:"); ok {
+		if stem, from, ok := strings.Cut(rest, " from "); ok {
+			return "included as " + stem + " by " + from
+		}
+	}
 	// A census landing: the index recorded a navigation site here.
 	if rest, ok := strings.CutPrefix(reason, "link:"); ok {
 		return "link site " + rest

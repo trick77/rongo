@@ -48,8 +48,14 @@ var nonDefinitionKinds = map[string]map[string]bool{
 
 // isDefinition reports whether a ctags record names something the reference
 // walk should be able to reach.
+//
+// No M/TEXT anchor is: a block or preview is named by its condition, and the
+// head's stem is what an include resolves, through files.stem under its own
+// rule (own repository, then a library). As a definition the stem was
+// followed by the name walk corpus-wide, and a Java word equal to it landed a
+// template.
 func isDefinition(lang, kind string) bool {
-	if dataLanguages[lang] {
+	if dataLanguages[lang] || lang == symbols.MTextLang {
 		return false
 	}
 	return !nonDefinitionKinds[lang][kind]
@@ -292,13 +298,20 @@ func deleteVecRows(ctx context.Context, tx *sql.Tx, query string, args ...any) e
 	return nil
 }
 
-// upsertFile inserts or updates the files row and returns its id.
+// upsertFile inserts or updates the files row and returns its id. An M/TEXT
+// file's row carries its folded stem, the key an include resolves by; every
+// other row an empty one.
 func upsertFile(ctx context.Context, tx *sql.Tx, repo, path, sha, lang string, size int, skipReason string) (int64, error) {
+	stem := ""
+	if lang == symbols.MTextLang {
+		stem = symbols.MTextStemKey(path)
+	}
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO files (repo, path, sha, lang, size, skip_reason) VALUES (?,?,?,?,?,?)
+		INSERT INTO files (repo, path, sha, lang, size, skip_reason, stem) VALUES (?,?,?,?,?,?,?)
 		ON CONFLICT (repo, path) DO UPDATE SET
-			sha = excluded.sha, lang = excluded.lang, size = excluded.size, skip_reason = excluded.skip_reason`,
-		repo, path, sha, lang, size, skipReason)
+			sha = excluded.sha, lang = excluded.lang, size = excluded.size, skip_reason = excluded.skip_reason,
+			stem = excluded.stem`,
+		repo, path, sha, lang, size, skipReason, stem)
 	if err != nil {
 		return 0, fmt.Errorf("record %s/%s: %w", repo, path, err)
 	}

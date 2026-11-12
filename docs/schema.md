@@ -9,6 +9,7 @@
 Go types:
 
 - `ask.Source` (internal/ask): Source is one piece of code the answer may be built on, and the reason it is here. The reason is not decoration: it is what lets an answer say "this file came in because grant.go calls NewGrant" instead of presenting twenty files as equally relevant.
+- `edges.Landing` (internal/edges): Landing is the chunk an M/TEXT include lands on: the head chunk of the file it names, where the stem is defined, with what a citation needs.
 - `retrieve.Hit` (internal/retrieve): Hit is one retrieved chunk, carrying everything a citation needs: repo, branch, path and line range. They are joined in the retrieval query rather than looked up afterwards, because every claim rongo makes must be citable and a second lookup is a second chance to lose the branch.
 
 | Column | Type | Null | Default | PK |
@@ -188,6 +189,7 @@ Go types:
 | `lang` | TEXT | no | `''` |  |
 | `size` | INTEGER | no | `0` |  |
 | `skip_reason` | TEXT | no | `''` |  |
+| `stem` | TEXT | no | `''` |  |
 
 Foreign keys:
 
@@ -195,6 +197,7 @@ Foreign keys:
 
 Indexes:
 
+- `idx_files_stem` (`stem`, `repo`) where `stem <> ''`
 - `sqlite_autoindex_files_1` (`repo`, `path`) unique
 
 ## integration_tokens
@@ -707,6 +710,7 @@ erDiagram
         TEXT lang
         INTEGER size
         TEXT skip_reason
+        TEXT stem
     }
     integration_tokens {
         INTEGER id PK

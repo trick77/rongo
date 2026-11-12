@@ -66,6 +66,13 @@ const (
 	// A placeholder ("${VERSION}", "{{ .Values.tag }}") is not a version
 	// and is not recorded; an untagged name is not a version either.
 	KindImage Kind = "image"
+	// KindInclude is an M/TEXT include: the stem of the template or text
+	// block a line pulls in, "#Blocks\Form_T1000" read as Form_T1000. It is
+	// NOT an edge either — two templates including one shared footer say
+	// nothing about each other, and a shared block is included by far more
+	// than three repositories' worth of templates — so Neighbours and
+	// Holders never match on it. Included resolves it to the file instead.
+	KindInclude Kind = "include"
 )
 
 // Token is one extracted destination with the line it was found on.
@@ -289,6 +296,9 @@ func Extract(filePath string, body []byte) []Token {
 	ext := strings.ToLower(path.Ext(filePath))
 	if yamlExt[ext] {
 		return imageRefs(body)
+	}
+	if mtextExt[ext] {
+		return includeRefs(body)
 	}
 	if !codeExt[ext] && !linkExt[ext] {
 		return nil

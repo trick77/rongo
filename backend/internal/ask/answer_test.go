@@ -665,6 +665,8 @@ func TestReachedVia_namesHowEachSourceArrived(t *testing.T) {
 			"reached in another repository, which shares the destination shipping-task from shipping/S.java"},
 		{"gap:unitPrice", "looked up by name after reading the sources: unitPrice"},
 		{"gap:/paymentAuth", "looked up by name after reading the sources: /paymentAuth"},
+		{"include:Form_T1000_de from letters/Forms/Demo_Form.mtxt",
+			"included as Form_T1000_de by letters/Forms/Demo_Form.mtxt"},
 	} {
 		if got := reachedVia(c.reason); got != c.want {
 			t.Errorf("reachedVia(%q) = %q, want %q", c.reason, got, c.want)

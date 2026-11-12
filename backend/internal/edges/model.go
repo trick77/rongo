@@ -11,3 +11,18 @@ type Neighbour struct {
 	Value string
 	Line  int
 }
+
+// Landing is the chunk an M/TEXT include lands on: the head chunk of the file
+// it names, where the stem is defined, with what a citation needs.
+//
+// Table: chunks
+type Landing struct {
+	ChunkID            int64
+	Repo, Branch, Path string
+	SHA, Symbol        string
+	StartLine, EndLine int
+	Text               string
+	// Stem is the file's stem as its name spells it, which a language
+	// variable or a case-blind match may spell differently from the include.
+	Stem string
+}

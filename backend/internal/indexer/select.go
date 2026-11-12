@@ -9,6 +9,7 @@ import (
 
 	"github.com/trick77/rongo/internal/pathglob"
 	"github.com/trick77/rongo/internal/redact"
+	"github.com/trick77/rongo/internal/symbols"
 )
 
 // Decision is what the selector concluded about one file.
@@ -218,11 +219,14 @@ var generatedMarker = regexp.MustCompile(`(?i)code generated .{0,60}do not edit|
 
 // dataExts are formats that hold rows, not code, whatever their size: tables,
 // event logs, source maps, snapshots, translation catalogues, drawings.
+// .translation is an M/TEXT dialog's labels in one language: the same label
+// keys in every dialog, and the German text already stands in the dialog.
 var dataExts = map[string]bool{
 	".csv": true, ".tsv": true, ".jsonl": true, ".ndjson": true, ".geojson": true,
 	".parquet": true, ".avro": true, ".map": true, ".snap": true, ".har": true,
 	".log": true, ".xlf": true, ".xliff": true, ".po": true, ".pot": true, ".mo": true,
 	".resx": true, ".strings": true, ".svg": true, ".pdf": true, ".ipynb": true,
+	".translation": true,
 }
 
 // sizedDataExts are the formats the data ceiling applies to. YAML is
@@ -516,6 +520,10 @@ var extLang = map[string]string{
 	// A service contract. Not a ctags language either: symbols.ExtractXSD
 	// reads it and the chunker anchors on its top-level definitions.
 	".xsd": "xsd", ".wsdl": "wsdl",
+	// An M/TEXT template or text block. ctags has no parser for it either:
+	// symbols.ExtractMText reads it, and the chunker anchors on its head,
+	// its top-level blocks and its preview.
+	".mtxm": symbols.MTextLang, ".mtxt": symbols.MTextLang,
 }
 
 // LanguageOf maps a path to a language by extension, returning "" when it does

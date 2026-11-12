@@ -1,0 +1,28 @@
+.DSC Erstellt am: 01.01.2020
+.DSC %Label0001;Payment reminder for an overdue premium
+.DSC Projekt: Demo_Project
+.DSC Pfad: Forms\Demo_Form.mtxt
+.DSC ----------------------------------------
+.PRO ON
+.SET *V1000_Kind,1
+#Blocks\Form_T1000_*HV_SPRACHE
+.IF $Letter.Recipient.HasPostalAddress = true
+.DSC #Blocks\Old_Address
+.NEW #Dialogs\Form_D2000,CLR,OUT
+.ELS
+.IF *V1000_Kind = 2
+#\\Shared_Lib\Blocks\Footnotes\Shared_Footer;$Letter.Date;short
+.END
+.END
+.TABLE width=100
+.ROW
+.CELL
+Total due
+.CELL END
+.ROW END
+.TABLE end
+.INC Forms\Form_Attachment.mtxt resolve=true
+.EOJ
+.DSC TEXT BEGIN
+.DSC Reminds a customer of an unpaid premium and names the amount due.
+.DSC TEXT END

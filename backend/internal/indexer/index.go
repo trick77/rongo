@@ -444,6 +444,9 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 	} else if isSchemaLang(lang) {
 		// Same for a schema: ctags' XML parser tags nothing a type is named by.
 		syms, err = symbols.ExtractXSD(body)
+	} else if lang == symbols.MTextLang {
+		// And for M/TEXT, which ctags does not know at all.
+		syms, err = symbols.ExtractMText(path, body)
 	} else {
 		syms, err = ix.symbols.Extract(ctx, path, body)
 	}

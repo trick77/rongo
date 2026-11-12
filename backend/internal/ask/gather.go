@@ -199,8 +199,20 @@ symbols:
 		// each source's own list, or a test the first source references is
 		// admitted ahead of the mechanism the second one references and a
 		// tight budget spends itself on the harness.
-		var refs []Source
+		//
+		// An M/TEXT include goes ahead of every reference: it names the
+		// file the template prints, where a name the walk follows is only
+		// a word that some file defines. Same hop, same budget, so an
+		// included block's own includes are a hop further on. A head too
+		// large for what is left is skipped rather than ending the walk:
+		// the references after it may still fit.
+		var incs, refs []Source
 		for _, from := range frontier {
+			inc, err := g.included(ctx, from)
+			if err != nil {
+				return nil, err
+			}
+			incs = append(incs, inc...)
 			r, err := g.referenced(ctx, from)
 			if err != nil {
 				return nil, err
@@ -208,6 +220,12 @@ symbols:
 			refs = append(refs, r...)
 		}
 		var next []Source
+		for _, inc := range incs {
+			if a.seen[inc.ChunkID] || !a.permits(inc) || !a.take(inc, hop) {
+				continue
+			}
+			next = append(next, inc)
+		}
 		for _, ref := range mechanismFirst(refs) {
 			// Outside the ceiling: never admitted, and never followed,
 			// or the next hop would gather by a reason the answer never
@@ -684,6 +702,32 @@ func (g *Gatherer) chunkAt(ctx context.Context, repo, path string, line int) (So
 		return Source{}, false, err
 	}
 	return s, true, nil
+}
+
+// included finds the M/TEXT files from's lines include and lands on each
+// one's head chunk, where its stem is defined. Only the includes on from's
+// own lines: a template's other blocks include what other cases print.
+//
+// Resolved by edges.Included, inside the turn's ceiling: the template's own
+// repository first, then the libraries the turn is built on. A copy of the
+// block in another product never lands and never decides anything.
+func (g *Gatherer) included(ctx context.Context, from Source) ([]Source, error) {
+	if !edges.IsMTextPath(from.Path) {
+		return nil, nil
+	}
+	ls, err := edges.Included(ctx, g.db, from.Repo, from.Path, from.StartLine, from.EndLine, g.ceiling)
+	if err != nil {
+		return nil, fmt.Errorf("follow includes from %s/%s: %w", from.Repo, from.Path, err)
+	}
+	out := make([]Source, 0, len(ls))
+	for _, l := range ls {
+		out = append(out, Source{
+			ChunkID: l.ChunkID, Repo: l.Repo, Branch: l.Branch, Path: l.Path, SHA: l.SHA,
+			Symbol: l.Symbol, StartLine: l.StartLine, EndLine: l.EndLine, Text: l.Text,
+			Reason: fmt.Sprintf("include:%s from %s/%s", l.Stem, from.Repo, from.Path),
+		})
+	}
+	return out, nil
 }
 
 // referenced finds chunks defining a symbol that from's code actually mentions.
