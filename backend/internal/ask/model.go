@@ -48,7 +48,9 @@ type Source struct {
 	// Reason is "hit" for something the search returned,
 	// "reference:<symbol>" for something a symbol hop reached, or
 	// "edge:<kind> <value> from <repo>/<path>" for something reached across a
-	// repository boundary on a shared queue name or route.
+	// repository boundary on a shared queue name or route, or
+	// "include:<stem> from <repo>/<path>" for an M/TEXT file a template
+	// includes.
 	Reason string
 	// Hop is 0 for a search hit and counts up from there.
 	Hop int

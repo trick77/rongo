@@ -107,6 +107,11 @@ func isSchemaLang(lang string) bool {
 	return lang == "xsd" || lang == "wsdl"
 }
 
+// mtextKinds are what a chunk anchors on in an M/TEXT file: the kinds
+// symbols.ExtractMText emits. Kept apart for schemaKinds' reason: "table" is
+// a SQL ctags kind, and an M/TEXT file has no ctags kinds at all.
+var mtextKinds = symbols.MTextAnchorKinds()
+
 // commentPrefixes are the line-comment openers rongo recognises when pulling a
 // doc comment into its symbol's chunk. It is deliberately a small, syntax-blind
 // set rather than a per-language grammar: a wrong guess costs a comment line
@@ -137,11 +142,14 @@ func ChunkFile(repo, path string, body []byte, syms []symbols.Symbol, opts Chunk
 	}
 
 	lines := strings.Split(strings.TrimSuffix(string(body), "\n"), "\n")
-	kinds := structuralKinds
-	if isSchemaLang(LanguageOf(path)) {
+	kinds, docs := structuralKinds, sharedDocs
+	switch lang := LanguageOf(path); {
+	case isSchemaLang(lang):
 		kinds = schemaKinds
+	case lang == symbols.MTextLang:
+		kinds, docs = mtextKinds, mtextDocs
 	}
-	regions := symbolRegions(lines, syms, kinds)
+	regions := symbolRegions(lines, syms, kinds, docs)
 
 	var out []Chunk
 	for _, r := range regions {
@@ -203,7 +211,7 @@ type region struct {
 
 // symbolRegions partitions the file at symbol boundaries. A file with no usable
 // symbol is one region covering everything, which the caller then windows.
-func symbolRegions(lines []string, syms []symbols.Symbol, kinds map[string]bool) []region {
+func symbolRegions(lines []string, syms []symbols.Symbol, kinds map[string]bool, docs docRule) []region {
 	anchors := anchorSymbols(syms, len(lines), kinds)
 	if len(anchors) == 0 {
 		return []region{{start: 1, end: len(lines)}}
@@ -219,7 +227,13 @@ func symbolRegions(lines []string, syms []symbols.Symbol, kinds map[string]bool)
 		if i > 0 {
 			floor = anchors[i-1].Line + 1
 		}
-		starts[i] = docStart(lines, a.Line, floor)
+		starts[i] = docStart(lines, a.Line, floor, docs.isComment)
+		if docs.floorIsOwned && i > 0 && starts[i] == floor {
+			// Comments all the way back to the previous anchor are that
+			// anchor's own text — an M/TEXT head's .DSC header — not a
+			// description of this one.
+			starts[i] = a.Line
+		}
 	}
 
 	var out []region
@@ -300,13 +314,31 @@ func contains(s symbols.Symbol, all []symbols.Symbol) bool {
 	return false
 }
 
+// docRule says what a doc comment is in one language: which trimmed lines
+// are comments, and whether a comment run reaching back to the previous
+// anchor belongs to that anchor instead.
+type docRule struct {
+	isComment    func(trimmed string) bool
+	floorIsOwned bool
+}
+
+// sharedDocs is the syntax-blind rule every ctags language uses.
+var sharedDocs = docRule{isComment: isComment}
+
+// mtextDocs is M/TEXT's: .DSC is the comment and nothing else is. A "#"
+// line there is an include and a "*" or "%" line output text, and pulling
+// them into the next block moved an include away from the lines it is
+// followed from. A head's .DSC header directly above the first block stays
+// in the head, the chunk an include lands on.
+var mtextDocs = docRule{isComment: symbols.IsMTextComment, floorIsOwned: true}
+
 // docStart walks up from a symbol's line over its contiguous comment block,
 // stopping at a blank line, at a non-comment line, or at floor.
-func docStart(lines []string, line, floor int) int {
+func docStart(lines []string, line, floor int, comment func(string) bool) int {
 	start := line
 	for l := line - 1; l >= floor; l-- {
 		t := strings.TrimSpace(lines[l-1])
-		if t == "" || !isComment(t) {
+		if t == "" || !comment(t) {
 			break
 		}
 		start = l

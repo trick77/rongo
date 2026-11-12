@@ -261,6 +261,12 @@ func TestSelectBody_decisionTable(t *testing.T) {
 			body: "<xliff version=\"1.2\"></xliff>\n",
 			want: SkipData,
 		},
+		{
+			name: "an M/TEXT dialog's label catalogue is data",
+			path: "Dialogs/#Form_D2000_fr_FR.translation",
+			body: "%Label0001=Total\n",
+			want: SkipData,
+		},
 		// Long data files: json and xml above the data ceiling are machine
 		// output or translations, never the answer.
 		{
@@ -585,6 +591,8 @@ func TestLanguageOf(t *testing.T) {
 		"scripts/build.sh":  "sh",
 		"README.md":         "md",
 		"config/app.yaml":   "yaml",
+		"Forms/Demo.mtxt":   "mtext",
+		"Blocks/#Demo.MTXM": "mtext",
 		"Makefile":          "",
 		"src/unknown.xyzzy": "",
 	}

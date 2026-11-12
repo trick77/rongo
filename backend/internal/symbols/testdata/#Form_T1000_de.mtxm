@@ -1,0 +1,35 @@
+.DSC Projekt: Demo_Project
+.DSC Pfad: Blocks\#Form_T1000_de.mtxm
+.DSC
+.DSC GUI hidden
+.DSC %Label0001;Overdue amount paragraph
+.SET *T1000_Total,$Letter.Total
+.SET *T1000_Hint(1),#Blocks\Form_Hint_*hv_GuiSprache
+.SWITCH $Letter.Kind
+.CASE 1
+.DSC .END
+Your payment is overdue.
+.CASE_DEFAULT
+.EOJ
+.END
+.IF *T1000_Total > 0
+.TABLE cols=2
+.ELS
+.TABLE cols=1
+.END
+.ROW
+.CELL
+*T1000_Total
+.CELL END
+.ROW END
+.TABLE END
+.WHILE *i < 3
+.ADA *i
+.END
+.TEXTFRAME x=1
+.IF *i = 3
+Three
+.END
+.TEXTFRAME END
+.SECTION header=none
+.UNKNOWNDIRECTIVE anything

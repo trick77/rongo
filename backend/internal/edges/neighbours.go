@@ -41,10 +41,10 @@ func Neighbours(ctx context.Context, db *sql.DB, repo, path string) ([]Neighbour
 // exact, because a spelled name is not a near side's literal and a loose rule
 // would land it on whatever route ends the same way.
 func Holders(ctx context.Context, db *sql.DB, kind Kind, value string) ([]Neighbour, error) {
-	if kind == KindLink || kind == KindImage {
-		// A link is not an edge: see KindLink. Nor is an image: see
-		// KindImage. Refused here, not left to the SQL, so a caller
-		// spelling the kind gets the same nothing.
+	if kind == KindLink || kind == KindImage || kind == KindInclude {
+		// A link is not an edge: see KindLink. Nor is an image or an
+		// include: see KindImage, KindInclude. Refused here, not left to
+		// the SQL, so a caller spelling the kind gets the same nothing.
 		return nil, nil
 	}
 	// The kind and the value are bound into the spread count rather than
@@ -141,8 +141,10 @@ func NeighboursWith(ctx context.Context, db *sql.DB, repo, path string, m Match)
 		  -- A link is not an edge (see KindLink): two user interfaces
 		  -- pointing at the same portal say nothing about each other. Nor
 		  -- is an image (see KindImage): two infrastructure repositories
-		  -- deploying one base image do not call each other.
-		  AND mine.kind <> 'link' AND mine.kind <> 'image'
+		  -- deploying one base image do not call each other. Nor is an
+		  -- include (see KindInclude): Included resolves it inside the
+		  -- turn instead.
+		  AND mine.kind <> 'link' AND mine.kind <> 'image' AND mine.kind <> 'include'
 		  -- Other repositories only, except for a property key read by
 		  -- CODE: the file that sets a key's default is a properties file
 		  -- in the SAME repository as the code reading it, and a properties
