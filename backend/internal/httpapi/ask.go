@@ -168,25 +168,10 @@ func wireCandidates(cands []ask.Candidate) []wireCandidate {
 	return out
 }
 
-// candidateRepos is what one card entry searches when it is chosen: the
-// repositories a project entry folded, or the single repository it named.
-//
-// Read from the RECORD, never resolved again. A project can gain a member in
-// repos.yaml between the card being drawn and the button being pressed, and
-// re-resolving would answer from a repository the card never offered — widening
-// the reader's own choice behind their back.
-//
-// An empty Members with a non-empty Repo is a card stored before projects
-// shipped, or a project of one. Both mean the same thing, and both are what
-// that entry meant when it was drawn.
+// candidateRepos is what one stored card entry searches when it is chosen;
+// see ask.EntryRepos.
 func candidateRepos(c threads.Candidate) []string {
-	if len(c.Members) > 0 {
-		return c.Members
-	}
-	if c.Repo != "" {
-		return []string{c.Repo}
-	}
-	return nil
+	return ask.EntryRepos(c.Members, c.Repo)
 }
 
 // addUnique appends the names seen has not met, in order, and marks them.
@@ -413,10 +398,8 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		// The scope the card was asked under carries over. Without it a resumed
-		// turn re-answers "how do loom and rongo differ" from rongo-only
-		// sources with no rule saying loom is not indexed, and the model
-		// writes loom's side out of its own training.
+		// The scope the card was asked under, narrowed to the choice below by
+		// ask.ResumeUnder.
 		m, ok, err := s.deps.Threads.Message(ctx, u.Subject, req.ClarificationMessageID)
 		if err != nil {
 			serverError(w, r, "resolve clarification scope failed", err)
@@ -435,15 +418,6 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// so the card's own ordinal would make the resumed turn follow a
 			// question it is still answering.
 			resumeMsg = &m
-		}
-		if resumeRepoChoice {
-			// The choice IS the scope now. Unknown carries over untouched: a
-			// repository the question named that the index does not have is
-			// still said out loud, whichever entry was picked. An empty repo is
-			// the "all repositories" entry, which is the reader's own
-			// permission to answer across the corpus and is recorded as such.
-			resumeScope.All = len(resumeRepos) == 0
-			resumeScope.Known = resumeRepos
 		}
 		resume = c
 		resumeHits = hits
@@ -510,9 +484,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// follow-up: the card's own turn wrote no answer, so what the new
 		// question points at is the answered turn below the one it joins.
 		//
-		// Its narrowing is the card's own, already carried over above: the
-		// choice a reader made on the card is what this turn is about, and
-		// the thread's older scope must not widen or contradict it.
+		// Its narrowing is the card's own: the choice a reader made on the
+		// card is what this turn is about, and the thread's older scope must
+		// not widen or contradict it (ask.ResumeUnder, shared with the eval
+		// harness so a measured choice is the one a reader makes).
 		thread = threads.Thread{ID: resume.ThreadID}
 		followUpIn = resume.ThreadID
 		if resumeMsg != nil {
@@ -521,7 +496,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		prior.Pin = resumeScope.Known
+		resumeScope, prior = ask.ResumeUnder(resumeScope, resumeRepoChoice, resumeRepos, prior)
 	case retryHead != nil:
 		// A retry continues the thread the question was asked in, read off the
 		// turn it retries rather than off the request: the row is what says

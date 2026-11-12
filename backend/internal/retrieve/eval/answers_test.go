@@ -72,6 +72,19 @@ type Rubric struct {
 	// pipeline, unjudged - it is setup, not a measurement - and what it
 	// answers becomes the Thread the measured turn inherits.
 	Follows string `json:"follows,omitempty"`
+	// Project is the project an analyst picks when the turn ends on a card:
+	// its name in repos.yaml, or the repository's own for one in no project -
+	// never the title the card prints, which a model writes per turn. Matched
+	// case-sensitively after trimming surrounding spaces. Empty, or a name the
+	// card does not offer, leaves the turn asked back and unjudged, and so
+	// does BACKEND_EVAL_ANSWER_CARDS=0.
+	//
+	// It exists because a card can be the right answer to the routing
+	// question and still leave the rubric measuring nothing: where two
+	// projects genuinely both answer, every run asks back. Picking the entry
+	// an analyst would click, and continuing the turn the way the product
+	// does, measures the answer the analyst then reads.
+	Project string `json:"project,omitempty"`
 }
 
 // rubricsFile is where the flow corpus's rubrics live. BACKEND_EVAL_RUBRICS
@@ -268,19 +281,27 @@ type answerRecord struct {
 	// Follows is the question this turn continued, when the rubric named one.
 	// Empty on a first turn, which is every question the arm carried before
 	// follow-ups were measured.
-	Follows   string   `json:"follows,omitempty"`
-	Asked     bool     `json:"asked"`
-	Answer    string   `json:"answer"`
-	Cited     []string `json:"cited"`
-	Must      []string `json:"must"`
-	MustNot   []string `json:"must_not"`
-	Present   int      `json:"present"`
-	Contra    int      `json:"contradicted"`
-	Asserted  int      `json:"asserted"`
-	CiteHit   int      `json:"cite_hit"`
-	CiteTotal int      `json:"cite_total"`
-	Tokens    int      `json:"tokens"`
-	Sources   int      `json:"sources"`
+	Follows string `json:"follows,omitempty"`
+	// Asked is the turn having ended on a card. Answered is the harness
+	// having continued that card on the rubric's project, and the answer and
+	// grades are that continuation's; Picked is the entry it chose, set too
+	// when continuing failed (Err says so). FollowsPicked is the same for the
+	// preceding turn, which is never judged.
+	Asked         bool     `json:"asked"`
+	Answered      bool     `json:"answered"`
+	Picked        string   `json:"picked,omitempty"`
+	FollowsPicked string   `json:"follows_picked,omitempty"`
+	Answer        string   `json:"answer"`
+	Cited         []string `json:"cited"`
+	Must          []string `json:"must"`
+	MustNot       []string `json:"must_not"`
+	Present       int      `json:"present"`
+	Contra        int      `json:"contradicted"`
+	Asserted      int      `json:"asserted"`
+	CiteHit       int      `json:"cite_hit"`
+	CiteTotal     int      `json:"cite_total"`
+	Tokens        int      `json:"tokens"`
+	Sources       int      `json:"sources"`
 	// Digraphs are the prose words of a German answer the model wrote with
 	// ß or an umlaut as ae/oe/ue, as it wrote them (ask.Answer.Respelled).
 	// The reader never sees them - swiss.go corrects the stream - so this
@@ -291,6 +312,94 @@ type answerRecord struct {
 	// and "" when the reader gets prose alone.
 	Diagram string `json:"diagram,omitempty"`
 	Err     string `json:"err,omitempty"`
+}
+
+// cardResumer is the pipeline call a chosen project entry continues through.
+// An interface so the arguments can be checked without a model.
+type cardResumer interface {
+	ResumeRepo(ctx context.Context, question string, u ask.Understanding, repos []string,
+		audience ask.Audience, lang ask.Language, scope ask.Scope, t ask.Thread, ev ask.Events) (ask.Answer, error)
+}
+
+var _ cardResumer = (*ask.Pipeline)(nil)
+
+// pickProject is the card entry an analyst clicks: the project entry named
+// project, exactly as the card names it. Only project entries count - an
+// empty module key, which is how Route marks a card of repositories or
+// projects - so a module entry in a repository of the same name is never
+// mistaken for the project, and the "all repositories" row, which names
+// nothing, is never picked.
+func pickProject(clar *ask.Clarification, project string) (ask.Candidate, bool) {
+	project = strings.TrimSpace(project)
+	if clar == nil || project == "" {
+		return ask.Candidate{}, false
+	}
+	for _, c := range clar.Candidates {
+		if c.ModuleKey == "" && c.Repo == project {
+			return c, true
+		}
+	}
+	return ask.Candidate{}, false
+}
+
+// unansweredNote says, for the asked-back line, why a rubric's project went
+// unanswered: a misspelt name must not pass for a question that keeps asking
+// back, and a module card is a card the harness cannot answer on a project.
+// Empty when the rubric names no project.
+func unansweredNote(clar *ask.Clarification, project string) string {
+	if strings.TrimSpace(project) == "" {
+		return ""
+	}
+	var offered []string
+	for _, c := range clar.Candidates {
+		if c.ModuleKey == "" && c.Repo != "" {
+			offered = append(offered, c.Repo)
+		}
+	}
+	if len(offered) == 0 {
+		return fmt.Sprintf("; project %q wanted, but the card offers no project entry (module card): not answerable", project)
+	}
+	return fmt.Sprintf("; project %q not offered, card has %v", project, offered)
+}
+
+// answerCardsArm is whether cards are answered on the rubric's project.
+// BACKEND_EVAL_ANSWER_CARDS=0 is the arm without: every card asked back and
+// unjudged, the shape of every run before this existed.
+func answerCardsArm(getenv func(string) string) bool {
+	return getenv("BACKEND_EVAL_ANSWER_CARDS") != "0"
+}
+
+// answerCard continues a turn that ended on clar the way the product does
+// when the reader picks c (httpapi handleAsk, a card or the too-broad panel
+// alike): ResumeRepo over the entry's repositories, under the scope and
+// thread ask.ResumeUnder builds for the handler too.
+//
+// The understanding and the scope go through JSON first because the product
+// never resumes from them in memory: it reads them back off the clarification
+// and the card's row, and what the record does not keep - the unexported
+// caches, every `json:"-"` field - a resumed turn does not have.
+func answerCard(ctx context.Context, r cardResumer, question string, audience ask.Audience, lang ask.Language,
+	clar *ask.Clarification, c ask.Candidate, t ask.Thread) (ask.Answer, error) {
+	repos := ask.EntryRepos(c.Members, c.Repo)
+	var u ask.Understanding
+	if err := roundTrip(clar.Understanding, &u); err != nil {
+		return ask.Answer{}, fmt.Errorf("understanding: %w", err)
+	}
+	var stored ask.Scope
+	if err := roundTrip(clar.Scope, &stored); err != nil {
+		return ask.Answer{}, fmt.Errorf("scope: %w", err)
+	}
+	scope, t := ask.ResumeUnder(stored, true, repos, t)
+	return r.ResumeRepo(ctx, question, u, repos, audience, lang, scope, t, ask.Events{})
+}
+
+// roundTrip is a value as the record reads it back.
+func roundTrip(v, out any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, out)
 }
 
 // TestEvalMeasureAnswers runs the product pipeline over the corpus's
@@ -356,11 +465,25 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	runs := envIntOr(t, "BACKEND_EVAL_ANSWER_RUNS", 2)
 	audience := ask.Audience(envOr("BACKEND_EVAL_AUDIENCE", string(ask.AudienceBA)))
 
+	// A card is answered on the rubric's project unless the arm is off; off,
+	// no rubric names one, and every card stays asked back.
+	answerCards := answerCardsArm(os.Getenv)
+	cardsArm := "answered on the rubric's project"
+	if !answerCards {
+		cardsArm = "asked back (BACKEND_EVAL_ANSWER_CARDS=0)"
+	}
+	projectOf := func(r Rubric) string {
+		if !answerCards {
+			return ""
+		}
+		return r.Project
+	}
+
 	out := filepath.Join(os.TempDir(), fmt.Sprintf("rongo-answers-%s.json", time.Now().Format("20060102-150405")))
 	var records []answerRecord
 	for run := 1; run <= runs; run++ {
-		var present, must, contra, asserted, citeHit, citeTotal, tokens, asked, failed, digraphs, diagrams int
-		t.Logf("\n=== run %d of %d, audience %s, rerank %s%s, memory %s ===", run, runs, audience, rerank, codeLaneLabel()+substringLaneLabel(), memoryArm)
+		var present, must, contra, asserted, citeHit, citeTotal, tokens, asked, answered, failed, digraphs, diagrams int
+		t.Logf("\n=== run %d of %d, audience %s, rerank %s%s, memory %s, cards %s ===", run, runs, audience, rerank, codeLaneLabel()+substringLaneLabel(), memoryArm, cardsArm)
 		for _, q := range questions {
 			r, ok := rubrics[q.Text]
 			if !ok {
@@ -372,9 +495,10 @@ func TestEvalMeasureAnswers(t *testing.T) {
 			// turn of a thread: the first is run to have something to follow,
 			// and only what it leaves behind - the question, the answer and
 			// the sources it was written from - reaches the turn under test.
-			// A setup turn that fails or asks back is reported and the
-			// question skipped, never measured against a thread that is not
-			// the one the rubric describes.
+			// A setup turn that fails or asks back (on a card its rubric
+			// names no offered project for) is reported and the question
+			// skipped, never measured against a thread that is not the one
+			// the rubric describes.
 			thread := ask.Thread{}
 			if r.Follows != "" {
 				// In ITS own language, which need not be the follow-up's: the
@@ -392,6 +516,14 @@ func TestEvalMeasureAnswers(t *testing.T) {
 					prevLang = ask.ParseLanguage(pr.Lang)
 				}
 				prev, prevClar, perr := pipeline.Run(ctx, r.Follows, audience, prevLang, ask.Thread{}, ask.Events{})
+				// A setup card its own rubric names a project for is answered
+				// the way the measured turn's is, and the follow-up then
+				// follows that answer, as it would in the product.
+				if pick, ok := pickProject(prevClar, projectOf(pr)); perr == nil && ok {
+					rec.FollowsPicked = pick.Repo
+					prev, perr = answerCard(ctx, pipeline, r.Follows, audience, prevLang, prevClar, pick, ask.Thread{})
+					prevClar = nil
+				}
 				switch {
 				case perr != nil:
 					rec.Err = "preceding turn: " + perr.Error()
@@ -402,7 +534,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 				case prevClar != nil:
 					rec.Err = "preceding turn asked back"
 					failed++
-					t.Logf("  %-70s SETUP ASKED BACK", short(q.Text))
+					t.Logf("  %-70s SETUP ASKED BACK (%d candidates)%s", short(q.Text), len(prevClar.Candidates), unansweredNote(prevClar, projectOf(pr)))
 					records = append(records, rec)
 					continue
 				}
@@ -436,10 +568,29 @@ func TestEvalMeasureAnswers(t *testing.T) {
 			}
 			if clar != nil {
 				rec.Asked = true
+				// A card naming the rubric's project is clicked, as an analyst
+				// would, and the answer it leads to is judged like any other.
+				// Otherwise the turn stays asked back and measures nothing.
+				pick, ok := pickProject(clar, projectOf(r))
+				if !ok {
+					asked++
+					t.Logf("  %-70s asked back (%d candidates)%s", short(q.Text), len(clar.Candidates), unansweredNote(clar, projectOf(r)))
+					records = append(records, rec)
+					continue
+				}
+				rec.Picked = pick.Repo
+				a, err = answerCard(ctx, pipeline, q.Text, audience, lang, clar, pick, thread)
+				if err != nil {
+					// Counted once, as failed: neither asked back nor judged.
+					rec.Err = "answering the card: " + err.Error()
+					failed++
+					t.Logf("  %-70s CARD ANSWER FAILED (%s): %v", short(q.Text), pick.Repo, err)
+					records = append(records, rec)
+					continue
+				}
 				asked++
-				t.Logf("  %-70s asked back (%d candidates)", short(q.Text), len(clar.Candidates))
-				records = append(records, rec)
-				continue
+				answered++
+				rec.Answered = true
 			}
 			rec.Answer = a.Text
 			if lang == ask.LanguageDE {
@@ -494,12 +645,20 @@ func TestEvalMeasureAnswers(t *testing.T) {
 			asserted += rec.Asserted
 			citeHit += rec.CiteHit
 			citeTotal += rec.CiteTotal
-			t.Logf("  %-70s rubric %d/%d present, %d contradicted, %d forbidden; cited %d/%d; %d sources; %d tokens; digraphs %d %v; diagram %q",
-				short(q.Text), rec.Present, len(r.Must), rec.Contra, rec.Asserted, rec.CiteHit, rec.CiteTotal, rec.Sources, rec.Tokens, len(rec.Digraphs), rec.Digraphs, rec.Diagram)
+			card := ""
+			if rec.Answered {
+				card = fmt.Sprintf("card answered with %q; ", rec.Picked)
+			}
+			t.Logf("  %-70s %srubric %d/%d present, %d contradicted, %d forbidden; cited %d/%d; %d sources; %d tokens; digraphs %d %v; diagram %q",
+				short(q.Text), card, rec.Present, len(r.Must), rec.Contra, rec.Asserted, rec.CiteHit, rec.CiteTotal, rec.Sources, rec.Tokens, len(rec.Digraphs), rec.Digraphs, rec.Diagram)
 			records = append(records, rec)
 		}
-		t.Logf("  run %d: rubric %d/%d present, %d contradicted, %d forbidden asserted; cited parts %d/%d; asked %d; failed %d; %d tokens; digraphs %d; diagrams %d",
-			run, present, must, contra, asserted, citeHit, citeTotal, asked, failed, tokens, digraphs, diagrams)
+		// Every question lands once: judged, asked back, or failed. asked
+		// counts every card that did not fail, answered the ones of those the
+		// harness continued and judged, so judged = questions - failed -
+		// (asked - answered). A card whose continuation failed is failed alone.
+		t.Logf("  run %d: rubric %d/%d present, %d contradicted, %d forbidden asserted; cited parts %d/%d; asked %d (answered %d); failed %d; %d tokens; digraphs %d; diagrams %d",
+			run, present, must, contra, asserted, citeHit, citeTotal, asked, answered, failed, tokens, digraphs, diagrams)
 	}
 	body, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
