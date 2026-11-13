@@ -286,22 +286,26 @@ type answerRecord struct {
 	// having continued that card on the rubric's project, and the answer and
 	// grades are that continuation's; Picked is the entry it chose, set too
 	// when continuing failed (Err says so). FollowsPicked is the same for the
-	// preceding turn, which is never judged.
-	Asked         bool     `json:"asked"`
-	Answered      bool     `json:"answered"`
-	Picked        string   `json:"picked,omitempty"`
-	FollowsPicked string   `json:"follows_picked,omitempty"`
-	Answer        string   `json:"answer"`
-	Cited         []string `json:"cited"`
-	Must          []string `json:"must"`
-	MustNot       []string `json:"must_not"`
-	Present       int      `json:"present"`
-	Contra        int      `json:"contradicted"`
-	Asserted      int      `json:"asserted"`
-	CiteHit       int      `json:"cite_hit"`
-	CiteTotal     int      `json:"cite_total"`
-	Tokens        int      `json:"tokens"`
-	Sources       int      `json:"sources"`
+	// preceding turn, which is never judged. Card is what the measured turn's
+	// card offered, picked or not, TooBroad that it was the too-broad panel;
+	// a preceding turn's card is not kept.
+	Asked         bool        `json:"asked"`
+	Card          []cardEntry `json:"card,omitempty"`
+	TooBroad      bool        `json:"too_broad,omitempty"`
+	Answered      bool        `json:"answered"`
+	Picked        string      `json:"picked,omitempty"`
+	FollowsPicked string      `json:"follows_picked,omitempty"`
+	Answer        string      `json:"answer"`
+	Cited         []string    `json:"cited"`
+	Must          []string    `json:"must"`
+	MustNot       []string    `json:"must_not"`
+	Present       int         `json:"present"`
+	Contra        int         `json:"contradicted"`
+	Asserted      int         `json:"asserted"`
+	CiteHit       int         `json:"cite_hit"`
+	CiteTotal     int         `json:"cite_total"`
+	Tokens        int         `json:"tokens"`
+	Sources       int         `json:"sources"`
 	// Digraphs are the prose words of a German answer the model wrote with
 	// ß or an umlaut as ae/oe/ue, as it wrote them (ask.Answer.Respelled).
 	// The reader never sees them - swiss.go corrects the stream - so this
@@ -312,6 +316,74 @@ type answerRecord struct {
 	// and "" when the reader gets prose alone.
 	Diagram string `json:"diagram,omitempty"`
 	Err     string `json:"err,omitempty"`
+}
+
+// cardEntry is one row of a card as the run records it. A card on a question
+// that belongs to one project says nothing about why it appeared; the entries,
+// the repositories each folds and the files that put it there do.
+type cardEntry struct {
+	// Name is the entry's project or repository. Empty on the row that names
+	// neither, AllRepos: its title is localized, so a name would differ by
+	// rubric language.
+	Name     string   `json:"name,omitempty"`
+	AllRepos bool     `json:"all_repos,omitempty"`
+	Module   string   `json:"module,omitempty"`
+	Members  []string `json:"members,omitempty"`
+	Score    float64  `json:"score,omitempty"`
+	// Hits are the best file of each repository the entry's hits fall in,
+	// repo/path, best first. One per repository, not the top few: a library
+	// folds into every product that uses it, and its files would fill every
+	// entry's list and hide the product's own.
+	Hits []string `json:"hits,omitempty"`
+}
+
+// cardEntries records what clar offered; nil without a card.
+func cardEntries(clar *ask.Clarification) []cardEntry {
+	if clar == nil {
+		return nil
+	}
+	out := make([]cardEntry, 0, len(clar.Candidates))
+	for _, c := range clar.Candidates {
+		e := cardEntry{Name: c.Repo, AllRepos: c.Repo == "", Module: c.ModuleKey, Members: c.Members, Score: c.Score}
+		seen := map[string]bool{}
+		for _, h := range c.Hits {
+			if seen[h.Repo] {
+				continue
+			}
+			seen[h.Repo] = true
+			e.Hits = append(e.Hits, h.Repo+"/"+h.Path)
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// cardLine renders a card on one log line, entries in card order.
+func cardLine(entries []cardEntry, tooBroad bool) string {
+	parts := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.AllRepos {
+			parts = append(parts, "all repositories")
+			continue
+		}
+		l := e.Name
+		if e.Module != "" {
+			l += " module " + e.Module
+		}
+		if len(e.Members) > 0 {
+			l += fmt.Sprintf(" %v", e.Members)
+		}
+		l += fmt.Sprintf(" %.4f", e.Score)
+		if len(e.Hits) > 0 {
+			l += ": " + strings.Join(e.Hits, ", ")
+		}
+		parts = append(parts, l)
+	}
+	kind := "card"
+	if tooBroad {
+		kind = "too-broad panel"
+	}
+	return kind + ": " + strings.Join(parts, " | ")
 }
 
 // cardResumer is the pipeline call a chosen project entry continues through.
@@ -568,6 +640,8 @@ func TestEvalMeasureAnswers(t *testing.T) {
 			}
 			if clar != nil {
 				rec.Asked = true
+				rec.Card, rec.TooBroad = cardEntries(clar), clar.TooBroad
+				t.Logf("  %-70s %s", short(q.Text), cardLine(rec.Card, rec.TooBroad))
 				// A card naming the rubric's project is clicked, as an analyst
 				// would, and the answer it leads to is judged like any other.
 				// Otherwise the turn stays asked back and measures nothing.
