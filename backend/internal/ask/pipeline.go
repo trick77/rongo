@@ -401,7 +401,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		scopedQuestion = ""
 	}
 	hits, err := p.searchScoped(ctx, scopedQuestion, u.Prior, texts, u.CodeText(), known, declared.Prefixes(stage),
-		p.onlyOneProduct(ctx, &scope))
+		p.onlyOneProduct(ctx, &scope, known))
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("search: %w", err)
 	}
@@ -465,19 +465,25 @@ func (p *Pipeline) projectsOf(ctx context.Context, scope *Scope) (projects.Map, 
 // retry" must search each side, or one fills the cut and the other has nothing
 // to compare. Two products, or a product beside a loose repository, is a
 // comparison. Project data unavailable is not one product.
-func (p *Pipeline) onlyOneProduct(ctx context.Context, scope *Scope) bool {
-	if len(scope.Known) < 2 {
+//
+// repos is what will be searched, which is not always scope.Known: a resumed
+// card choice keeps the stored entry in Known, and resolving it can name the
+// project and expand to every member. Judged on the stored [vers] while the
+// four repositories it resolved to were searched, the choice ran as a
+// four-sided comparison and the three libraries took three quarters of the cut.
+func (p *Pipeline) onlyOneProduct(ctx context.Context, scope *Scope, repos []string) bool {
+	if len(repos) < 2 {
 		return false
 	}
 	pm, err := p.projectsOf(ctx, scope)
 	if err != nil {
 		return false
 	}
-	covered := pm.Covered(scope.Known)
-	if len(covered) != 1 || len(looseOf(scope.Known, covered, pm)) != 0 {
+	covered := pm.Covered(repos)
+	if len(covered) != 1 || len(looseOf(repos, covered, pm)) != 0 {
 		return false
 	}
-	have := setOf(scope.Known)
+	have := setOf(repos)
 	for _, m := range pm.Members(covered[0]) {
 		if !have[m] {
 			return false
@@ -1373,7 +1379,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		// out for the reason the single-repository search left it out:
 		// knownRepos would union the other repositories back in and undo the
 		// choice.
-		hits, err = p.searchScoped(ctx, "", u.Prior, texts, u.CodeText(), known, stage, p.onlyOneProduct(ctx, &scope))
+		hits, err = p.searchScoped(ctx, "", u.Prior, texts, u.CodeText(), known, stage, p.onlyOneProduct(ctx, &scope, known))
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)
 		}

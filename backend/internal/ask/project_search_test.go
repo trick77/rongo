@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // namingRepos is the understanding fixture with its repos replaced.
@@ -86,6 +88,85 @@ func TestResumeRepo_aChosenProductIsOneSearch(t *testing.T) {
 	}
 	if len(queries) != 1 || len(queries[0].Repos) != 3 {
 		t.Fatalf("queries = %+v, want one search over the product", queries)
+	}
+}
+
+// expandingSearch resolves a project's name to all its members, libraries
+// included, the way the retriever's knownRepos does.
+type expandingSearch struct {
+	indexedSearch
+	projects map[string][]string
+}
+
+func (s expandingSearch) ResolveRepos(_ context.Context, want []string, _ string) (known, unknown []string, err error) {
+	seen := map[string]bool{}
+	for _, w := range want {
+		for _, r := range append([]string{w}, s.projects[w]...) {
+			if !seen[r] && slices.Contains(s.indexed, r) {
+				seen[r] = true
+				known = append(known, r)
+			}
+		}
+	}
+	return known, nil, nil
+}
+
+// lettersMap is letters, a product named like its one repository, built on
+// two libraries, base and forms.
+func lettersMap(t *testing.T) projects.Map {
+	t.Helper()
+	db := storetest.Open(t, 1536)
+	for _, r := range [][3]string{{"letters", "letters", "0"}, {"base", "base", "1"}, {"forms", "forms", "1"}} {
+		if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url, project, library) VALUES (?, ?, ?, ?)`,
+			r[0], "https://example.invalid/"+r[0]+".git", r[1], r[2]); err != nil {
+			t.Fatalf("seed %s: %v", r[0], err)
+		}
+	}
+	for _, u := range []string{"base", "forms"} {
+		if _, err := db.Exec(`INSERT INTO repo_uses (repo, uses) VALUES (?, ?)`, "letters", u); err != nil {
+			t.Fatalf("seed edge: %v", err)
+		}
+	}
+	m, err := projects.Load(context.Background(), db)
+	if err != nil {
+		t.Fatalf("projects.Load() err = %v", err)
+	}
+	return m
+}
+
+// A card entry for letters stores the members that had hits; resolving it
+// names the project and so expands to every member, both libraries included.
+// That expanded list is what is searched, and it is the whole product: one
+// search. Decided on the stored list instead, it was a comparison of four
+// sides and the libraries took three quarters of the cut.
+func TestResumeRepo_aChoiceResolvedToTheWholeProductIsOneSearch(t *testing.T) {
+	for _, chosen := range [][]string{{"letters"}, {"base", "letters"}} {
+		t.Run(strings.Join(chosen, "+"), func(t *testing.T) {
+			var queries []retrieve.Query
+			search := expandingSearch{
+				indexedSearch: indexedSearch{indexed: []string{"letters", "base", "forms"}, searchFunc: func(q retrieve.Query) ([]retrieve.Hit, error) {
+					queries = append(queries, q)
+					return []retrieve.Hit{{ChunkID: 1, Repo: q.Repos[0], Path: "a.mtxt"}}, nil
+				}},
+				projects: map[string][]string{"letters": {"letters", "base", "forms"}},
+			}
+			p := newTestPipeline(t, func(f *pipelineFakes) {
+				f.search = search
+				f.router = &fakeRouter{projects: lettersMap(t)}
+			})
+			scope, thread := ResumeUnder(Scope{}, true, chosen, Thread{})
+
+			if _, err := p.ResumeRepo(context.Background(), "which letter goes out?",
+				Understanding{Terms: []string{"letter"}}, chosen, AudienceBA, LanguageDE, scope, thread, Events{}); err != nil {
+				t.Fatalf("resume repo: %v", err)
+			}
+			if len(queries) != 1 {
+				t.Fatalf("ran %d searches, want one over the product: %+v", len(queries), queries)
+			}
+			if got := slices.Sorted(slices.Values(queries[0].Repos)); !slices.Equal(got, []string{"base", "forms", "letters"}) || queries[0].K != comparisonK {
+				t.Errorf("searched %v at depth %d, want the whole product at %d", got, queries[0].K, comparisonK)
+			}
+		})
 	}
 }
 
