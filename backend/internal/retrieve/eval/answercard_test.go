@@ -98,6 +98,60 @@ func TestUnansweredNote(t *testing.T) {
 	}
 }
 
+// A card is recorded as offered: each entry with the repositories it folds
+// and the best file of each repository its hits fall in, so a run shows which
+// project made the card even when a shared library outscores the product.
+func TestCardEntries_recordWhatTheCardOffered(t *testing.T) {
+	clar := &ask.Clarification{Candidates: []ask.Candidate{
+		{Repo: "templates", Members: []string{"shared", "templates"}, Score: 0.031, Hits: []retrieve.Hit{
+			{Repo: "shared", Path: "a.txt"}, {Repo: "shared", Path: "x.txt"}, {Repo: "shared", Path: "y.txt"},
+			{Repo: "templates", Path: "b.txt"}, {Repo: "templates", Path: "c.txt"},
+		}},
+		{Repo: "billing", ModuleKey: "internal/api", Score: 0.02},
+		{Title: "Alle Repositories"},
+	}}
+	got := cardEntries(clar)
+	want := []cardEntry{
+		{Name: "templates", Members: []string{"shared", "templates"}, Score: 0.031, Hits: []string{"shared/a.txt", "templates/b.txt"}},
+		{Name: "billing", Module: "internal/api", Score: 0.02},
+		{AllRepos: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("cardEntries =\n%+v\nwant\n%+v", got, want)
+	}
+	if cardEntries(nil) != nil {
+		t.Error("no card, no entries")
+	}
+	wantLine := "card: templates [shared templates] 0.0310: shared/a.txt, templates/b.txt | billing module internal/api 0.0200 | all repositories"
+	if line := cardLine(got, false); line != wantLine {
+		t.Errorf("cardLine =\n%q\nwant\n%q", line, wantLine)
+	}
+	if line := cardLine(got[:1], true); !strings.HasPrefix(line, "too-broad panel: templates ") {
+		t.Errorf("too-broad cardLine = %q", line)
+	}
+}
+
+// The answers file is read after the run: the card keeps its keys, and a
+// turn without one carries none.
+func TestAnswerRecord_keepsTheCard(t *testing.T) {
+	b, err := json.Marshal(answerRecord{Asked: true, TooBroad: true, Card: []cardEntry{{Name: "templates", Score: 0.5}, {AllRepos: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"card":[{"name":"templates","score":0.5},{"all_repos":true}]`, `"too_broad":true`} {
+		if !strings.Contains(string(b), key) {
+			t.Errorf("record %s lacks %s", b, key)
+		}
+	}
+	b, err = json.Marshal(answerRecord{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"card"`) || strings.Contains(string(b), `"too_broad"`) {
+		t.Errorf("record without a card carries one: %s", b)
+	}
+}
+
 // The resumed turn gets what handleAsk hands ResumeRepo: the entry's members,
 // the card's scope as the record reads it back narrowed to them, and the
 // thread pinned to them.
