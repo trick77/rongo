@@ -31,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -306,6 +307,15 @@ type answerRecord struct {
 	CiteTotal     int         `json:"cite_total"`
 	Tokens        int         `json:"tokens"`
 	Sources       int         `json:"sources"`
+	// Gathered is every source the answer was written from, in the order the
+	// prompt got them (hits, then what hops and crossings added; not a rank),
+	// with how each arrived. GatherHit counts the expected parts among them
+	// and NotGathered names the rest: a part the answer missed was then either
+	// never gathered or gathered and not used. All three are absent on a turn
+	// that was not judged; GatherHit is absent too when none was gathered.
+	Gathered    []gatheredSource `json:"gathered,omitempty"`
+	GatherHit   int              `json:"gather_hit,omitempty"`
+	NotGathered []string         `json:"not_gathered,omitempty"`
 	// Digraphs are the prose words of a German answer the model wrote with
 	// ß or an umlaut as ae/oe/ue, as it wrote them (ask.Answer.Respelled).
 	// The reader never sees them - swiss.go corrects the stream - so this
@@ -316,6 +326,59 @@ type answerRecord struct {
 	// and "" when the reader gets prose alone.
 	Diagram string `json:"diagram,omitempty"`
 	Err     string `json:"err,omitempty"`
+}
+
+// gatheredSource is one source of an answer as the run records it: the file
+// (or repo@commit), its lines when it has any, and ask.Source's Reason and Hop.
+type gatheredSource struct {
+	Path   string `json:"path"`
+	Lines  string `json:"lines,omitempty"`
+	Reason string `json:"reason"`
+	Hop    int    `json:"hop"`
+}
+
+// gatheredSources records srcs in their order.
+func gatheredSources(srcs []ask.Source) []gatheredSource {
+	out := make([]gatheredSource, 0, len(srcs))
+	for _, s := range srcs {
+		g := gatheredSource{Path: s.Repo + "/" + s.Path, Reason: s.Reason, Hop: s.Hop}
+		switch {
+		case s.IsCommit():
+			g.Path = s.Repo + "@" + s.SHA
+		case s.StartLine == 0:
+		case s.StartLine == s.EndLine:
+			g.Lines = strconv.Itoa(s.StartLine)
+		default:
+			g.Lines = fmt.Sprintf("%d-%d", s.StartLine, s.EndLine)
+		}
+		out = append(out, g)
+	}
+	return out
+}
+
+// partsGathered counts the parts some source of srcs comes from, a commit
+// counting for the files it changed, and names the others, in want's order.
+func partsGathered(want []flowPart, srcs []ask.Source) (int, []string) {
+	have := map[flowPart]bool{}
+	for _, s := range srcs {
+		if !s.IsCommit() {
+			have[flowPart{Repo: s.Repo, Path: s.Path}] = true
+			continue
+		}
+		for _, p := range s.Paths {
+			have[flowPart{Repo: s.Repo, Path: p}] = true
+		}
+	}
+	hit := 0
+	var missing []string
+	for _, p := range want {
+		if have[p] {
+			hit++
+			continue
+		}
+		missing = append(missing, p.String())
+	}
+	return hit, missing
 }
 
 // cardEntry is one row of a card as the run records it. A card on a question
@@ -554,7 +617,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	out := filepath.Join(os.TempDir(), fmt.Sprintf("rongo-answers-%s.json", time.Now().Format("20060102-150405")))
 	var records []answerRecord
 	for run := 1; run <= runs; run++ {
-		var present, must, contra, asserted, citeHit, citeTotal, tokens, asked, answered, failed, digraphs, diagrams int
+		var present, must, contra, asserted, citeHit, citeTotal, gatherHit, tokens, asked, answered, failed, digraphs, diagrams int
 		t.Logf("\n=== run %d of %d, audience %s, rerank %s%s, memory %s, cards %s ===", run, runs, audience, rerank, codeLaneLabel()+substringLaneLabel(), memoryArm, cardsArm)
 		for _, q := range questions {
 			r, ok := rubrics[q.Text]
@@ -686,6 +749,8 @@ func TestEvalMeasureAnswers(t *testing.T) {
 				want = q.parts()
 			}
 			rec.CiteTotal = len(want)
+			rec.Gathered = gatheredSources(a.Sources)
+			rec.GatherHit, rec.NotGathered = partsGathered(want, a.Sources)
 			for _, p := range want {
 				for _, cit := range a.Citations {
 					if cit.Repo == p.Repo && cit.Path == p.Path {
@@ -718,21 +783,22 @@ func TestEvalMeasureAnswers(t *testing.T) {
 			contra += rec.Contra
 			asserted += rec.Asserted
 			citeHit += rec.CiteHit
+			gatherHit += rec.GatherHit
 			citeTotal += rec.CiteTotal
 			card := ""
 			if rec.Answered {
 				card = fmt.Sprintf("card answered with %q; ", rec.Picked)
 			}
-			t.Logf("  %-70s %srubric %d/%d present, %d contradicted, %d forbidden; cited %d/%d; %d sources; %d tokens; digraphs %d %v; diagram %q",
-				short(q.Text), card, rec.Present, len(r.Must), rec.Contra, rec.Asserted, rec.CiteHit, rec.CiteTotal, rec.Sources, rec.Tokens, len(rec.Digraphs), rec.Digraphs, rec.Diagram)
+			t.Logf("  %-70s %srubric %d/%d present, %d contradicted, %d forbidden; cited %d/%d; gathered %d/%d; %d sources; %d tokens; digraphs %d %v; diagram %q",
+				short(q.Text), card, rec.Present, len(r.Must), rec.Contra, rec.Asserted, rec.CiteHit, rec.CiteTotal, rec.GatherHit, rec.CiteTotal, rec.Sources, rec.Tokens, len(rec.Digraphs), rec.Digraphs, rec.Diagram)
 			records = append(records, rec)
 		}
 		// Every question lands once: judged, asked back, or failed. asked
 		// counts every card that did not fail, answered the ones of those the
 		// harness continued and judged, so judged = questions - failed -
 		// (asked - answered). A card whose continuation failed is failed alone.
-		t.Logf("  run %d: rubric %d/%d present, %d contradicted, %d forbidden asserted; cited parts %d/%d; asked %d (answered %d); failed %d; %d tokens; digraphs %d; diagrams %d",
-			run, present, must, contra, asserted, citeHit, citeTotal, asked, answered, failed, tokens, digraphs, diagrams)
+		t.Logf("  run %d: rubric %d/%d present, %d contradicted, %d forbidden asserted; cited parts %d/%d; gathered parts %d/%d; asked %d (answered %d); failed %d; %d tokens; digraphs %d; diagrams %d",
+			run, present, must, contra, asserted, citeHit, citeTotal, gatherHit, citeTotal, asked, answered, failed, tokens, digraphs, diagrams)
 	}
 	body, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
