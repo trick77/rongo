@@ -44,7 +44,7 @@ Numbers: `docs/measurements/`; bullet cites one → read it before overturning.
 - Never gather outside the turn's projects (+ `uses` libraries): one ceiling, every path. Live turn: one project named, 11 repos gathered.
 - Card offers PROJECTS, never repos: the one option an Analyst tells apart. Interdependent candidates = composition: answer all, no card.
 - Cross a repo boundary only with two reasons: gathered code really references the symbol, target repo indexed.
-- Measured OFF, stay off: route suffix matching, whole-file reading, gate `json_object` (`2026-09-13-json-object.md`), second FTS column of paths + split identifiers (`2026-09-16-code-rung.md`), excluding test files: labelled instead (`2026-09-17-test-label.md`), landing an M/TEXT include's blocks (`2026-11-13-mtext-include-blocks.md`, code dropped). Knobs stay; tables say why.
+- Measured OFF, stay off: route suffix matching, whole-file reading, gate `json_object` (`2026-09-13-json-object.md`), second FTS column of paths + split identifiers (`2026-09-16-code-rung.md`), excluding test files: labelled instead (`2026-09-17-test-label.md`), M/TEXT include blocks, switch pass from hits (never seeded on its target) (`2026-11-13-mtext-include-blocks.md`, `2026-11-14-mtext-switches.md`; code dropped). Other knobs stay; tables say why.
 
 ## Repos, index
 - Repos page: read-only, no CRUD; list = `repos.yaml`.
