@@ -5,8 +5,9 @@ one-product decision now reads the repositories the choice resolved to, not
 the stored card entry. On eight questions of one letters project: 34/46
 rubric claims present (74%) against 27/58 (47%) before, contradicted 3 to 0,
 forbidden 2 to 0. On the four questions with source logging both ways the
-expected files reached the sources 10/12 times against 3/12. Two of the
-three questions that scored zero now score in both runs.**
+expected files reached the sources 10/12 times against 3/12 (counted per
+file, not per line: see below). Two of the three questions that scored zero
+now score in both runs.**
 
 ## What was wrong
 
@@ -71,7 +72,11 @@ only the percentage.
 
 Expected files gathered into the sources, on the four questions of the
 source-logging call (which letter, singular vs plural, bulk vs manual,
-shared condition): 1/5 and 2/7 per run before, 4/5 and 6/7 after.
+shared condition): 1/5 and 2/7 per run before, 4/5 and 6/7 after. The
+harness counts a file as gathered when any chunk of it, the whole file, or
+a commit that changed it is among the sources, so a file can count while
+the lines that answer the question are missing; see the enclosure question
+below.
 
 ## Reading
 
@@ -80,11 +85,25 @@ after: which letter (0, 0 to 2/2, 1/2) and bulk vs manual (0, 0 to 3/4,
 1/4). The shared-condition question went from 1-3 of 4 over four runs to
 3/4 twice. The three questions that scored full stayed full. The
 singular vs plural enclosure question rests on one judged run per arm
-(0/4 to 1/4) and proves nothing either way; it now gathers its expected
-files, but its answer hits the completion length cap in one run of each
-arm. The next problem there is the answer, not retrieval. The module card
-on the loop question is a card inside one project; one run of it says
-nothing about this change.
+(0/4 to 1/4) and proves nothing either way. Its answer hits the
+completion length cap in one run of each arm.
+
+An earlier version of this doc read that question as an answer problem,
+because both its expected files counted as gathered after the change. They
+count per file, and the lines are missing. The question's logic sits in a
+block the letter template includes (`2026-11-13-mtext-include-blocks.md`).
+In the after arm's judged run, of that block only the head and the chunk
+after it reached the sources; the three chunks that count the items and
+pick singular or plural did not. A bm25 query over the whole index with
+the question's eight content words, OR-joined, ranks them 940, 1417 and
+1514 of about 4200 matches. That is the keyword side only; the vector lane was not checked. The judged
+answer itself says the excerpts do not show where the case is decided. The
+gap there is retrieval. Landing every block of an included file was
+measured and not adopted (same doc); a fix has to reach these three chunks
+more narrowly.
+
+The module card on the loop question is a card inside one project; one run
+of it says nothing about this change.
 
 Not fixed here: only an entry that names its project expands to every
 member. A project whose repositories are all named unlike the project
