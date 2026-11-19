@@ -2604,6 +2604,30 @@ describe("Ask, retrying a failed turn", () => {
     });
   });
 
+  it("asks again as the same question when the stream dropped after the record", async () => {
+    // A proxy FIN after the thread event: no error, no done, so the id came
+    // only with the thread event.
+    const mock = queuedPostFetch([
+      [
+        ev("thread", { thread_id: "1", message_id: 5 }),
+        ev("status", { step: "answering" }),
+      ],
+      [
+        ev("thread", { thread_id: "1", message_id: 6 }),
+        ev("token", { text: "The answer." }),
+        ev("done", { message_id: 6 }),
+      ],
+    ]);
+
+    const user = await ask("How?");
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+
+    await screen.findByText("The answer.");
+    expect(screen.getAllByRole("article").length).toBe(1);
+    const posts = mock.mock.calls.filter((c) => c[0] === "/api/ask");
+    expect(JSON.parse(String(posts[1][1]?.body)).head_message_id).toBe(5);
+  });
+
   it("holds the retry while another turn is streaming", async () => {
     const stream = pushableStream();
     const user = userEvent.setup();

@@ -37,6 +37,24 @@ describe("applyEvent", () => {
     ).toBe("fr");
   });
 
+  it("keeps the id the thread event files the turn under, apart from messageId", () => {
+    const t = applyEvent(
+      turn(),
+      "thread",
+      { thread_id: "7", message_id: 42 },
+      1,
+    );
+
+    // Not messageId yet: the turn is still streaming, and an id there would
+    // move it into another group mid-answer.
+    expect(t.messageId).toBeNull();
+    expect(t.recordedAs).toBe(42);
+    // A backend that sends no id leaves it unknown.
+    expect(applyEvent(turn(), "thread", { thread_id: "7" }, 1).recordedAs).toBe(
+      undefined,
+    );
+  });
+
   it("puts a step on the timeline and its detail on the latest step of that name", () => {
     // Given a comparison turn, which searches twice
     let t = applyEvent(turn(), "status", { step: "searching" }, 1100);

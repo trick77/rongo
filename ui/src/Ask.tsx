@@ -602,8 +602,16 @@ export default function Ask({
     // nothing patched the turn, so the trace ticked on with no answer, no
     // error and no way out.
     let closed = false;
+    // A turn the record already holds keeps its id when it fails, the way the
+    // error event hands it over: Retry is then another attempt at that row.
     const fail = (error: string) =>
-      patchLast((t) => ({ ...t, error, done: true, endedAt: Date.now() }));
+      patchLast((t) => ({
+        ...t,
+        error,
+        done: true,
+        endedAt: Date.now(),
+        messageId: t.messageId ?? t.recordedAs ?? null,
+      }));
     // The request the turn was made with, so a failure can be asked again. A
     // resume passes retryable false: its card unlocks itself on failure, and a
     // button beside the error would be a second way to spend the same call.

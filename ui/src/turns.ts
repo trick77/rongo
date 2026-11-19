@@ -74,6 +74,12 @@ export type Turn = {
   // The id of the message this turn was recorded as, once known. Reexplain
   // needs it; a turn still in flight has none yet.
   messageId: number | null;
+  // The id the thread event filed the question under, while the turn still
+  // streams. Apart from messageId on purpose: an id there would regroup the
+  // turn mid-answer. A stream that drops before its error or done could say
+  // the id again hands it to messageId on failing, so Retry asks again as
+  // another attempt at this row instead of filing the question twice.
+  recordedAs?: number;
   // Whether the server has a row for this turn. A turn that failed before the
   // record was written is on screen but not in the thread, and must not pin
   // the thread's language — the reader has to be able to pick another one and
