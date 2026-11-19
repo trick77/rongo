@@ -121,7 +121,10 @@ func TestAuthLogout_passwordModeSaysLocal(t *testing.T) {
 // come back. Another client is not held.
 func TestPasswordLoginIsThrottledPerClient(t *testing.T) {
 	srv := passwordServer(t)
-	srv.logins = ratelimit.NewThrottle(50*time.Millisecond, 0)
+	// The gap must outlast the first attempt's hash compare: at 50ms a gate
+	// run under -race and full load let the second attempt through as a 401.
+	const gap = time.Second
+	srv.logins = ratelimit.NewThrottle(gap, 0)
 	wrong := `{"username":"admin","password":"hunter3"}`
 
 	if rec := postPassword(srv, wrong); rec.Code != http.StatusUnauthorized {
@@ -139,7 +142,7 @@ func TestPasswordLoginIsThrottledPerClient(t *testing.T) {
 		t.Errorf("another client = %d, want 401 at once", rec.Code)
 	}
 
-	time.Sleep(60 * time.Millisecond)
+	time.Sleep(gap + 50*time.Millisecond)
 	if rec := postPassword(srv, `{"username":"admin","password":"hunter2"}`); rec.Code != http.StatusNoContent {
 		t.Errorf("after the gap = %d, want 204", rec.Code)
 	}
