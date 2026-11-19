@@ -3,6 +3,7 @@ import { useState } from "react";
 import { copyText } from "../http";
 import { useFlash, useLoaded, useReportCount } from "../hooks";
 import { Icon } from "../Icon";
+import { daysAgo } from "../Threads";
 import { listShares, revokeShare, shareURL, type Share } from "./api";
 
 /**
@@ -26,7 +27,7 @@ const action =
 function day(iso: string): { date: string; ago: string } {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return { date: "", ago: "" };
-  const days = Math.round((Date.now() - d.getTime()) / 86400000);
+  const days = daysAgo(d);
   return {
     date: d.toLocaleString("en-GB", {
       day: "numeric",
