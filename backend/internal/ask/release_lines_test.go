@@ -1,9 +1,11 @@
 package ask
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/history"
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/stages"
 )
@@ -17,7 +19,7 @@ func TestReleaseNotes_everyNoteHasAClauseAndASentenceInEveryLanguage(t *testing.
 	for _, note := range notes {
 		line := ReleaseLine{Image: "acme/x", Repo: "x", Versions: map[string]string{"prod": "1", "test": "2"},
 			Note: note, Detail: "1 main", Ahead: "prod"}
-		if got := noteEnglish(line); got == "" {
+		if got := noteEnglish(line, 0); got == "" {
 			t.Errorf("noteEnglish(%s) = %q", note, got)
 		}
 		for _, lang := range []Language{LanguageEN, LanguageDE, LanguageFR, LanguageIT} {
@@ -32,15 +34,57 @@ func TestReleaseNotes_everyNoteHasAClauseAndASentenceInEveryLanguage(t *testing.
 	}
 	// A forward range: the count, and the cut once it exceeds the cap.
 	fwd := ReleaseLine{Repo: "x", Ahead: "test", Commits: 1}
-	if got := noteEnglish(fwd); got != "test is ahead by 1 commit" {
+	if got := noteEnglish(fwd, 1); got != "test is ahead by 1 commit" {
 		t.Errorf("forward = %q", got)
 	}
 	fwd.Commits = 45
-	if got := noteEnglish(fwd); !strings.Contains(got, "45 commits") || !strings.Contains(got, "newest 30") {
+	if got := noteEnglish(fwd, 30); !strings.Contains(got, "45 commits") || !strings.Contains(got, "newest 30") {
 		t.Errorf("cut = %q", got)
 	}
 	if got := NoRelease(LanguageEN, pair, "infra", []ReleaseLine{{Image: "acme/y", Note: "made-up"}}); strings.Count(got, "\n") != 0 {
 		t.Errorf("an unknown note printed a line: %q", got)
+	}
+}
+
+// The turn's own cap cuts too: past ninety commits a component the listing
+// calls "ahead by 30" has fewer, or none, among the sources, and the prompt
+// asks the model to say a cut list is cut. The listing and the sources must
+// agree on what was shown.
+func TestReleaseListing_saysTheCutTheTurnsCapMade(t *testing.T) {
+	pair := []string{"prod", "test"}
+	var lines []ReleaseLine
+	commits := map[string][]history.Commit{}
+	for i, n := range []int{30, 30, 20, 30, 40} {
+		repo := fmt.Sprintf("c%d", i)
+		lines = append(lines, ReleaseLine{Image: "acme/" + repo, Repo: repo, Ahead: "test", Commits: n,
+			Versions: map[string]string{"prod": "1", "test": "2"}})
+		for j := range n {
+			commits["acme/"+repo] = append(commits["acme/"+repo], history.Commit{Repo: repo, SHA: fmt.Sprintf("%s-%d", repo, j)})
+		}
+	}
+
+	sources := releaseSources(lines, commits)
+	listing := releaseListing(lines, pair)
+
+	if len(sources) != releaseTotal {
+		t.Fatalf("sources = %d, want the turn's cap of %d", len(sources), releaseTotal)
+	}
+	perRepo := map[string]int{}
+	for _, s := range sources {
+		perRepo[s.Repo]++
+	}
+	for _, want := range []string{
+		"c0: prod 1, test 2, test is ahead by 30 commits\n",
+		"c2: prod 1, test 2, test is ahead by 20 commits\n",
+		"c3: prod 1, test 2, test is ahead by 30 commits (the newest 10 are among the sources)\n",
+		"c4: prod 1, test 2, test is ahead by 40 commits (none of them are among the sources: the list was cut)\n",
+	} {
+		if !strings.Contains(listing, want) {
+			t.Errorf("listing lacks %q:\n%s", want, listing)
+		}
+	}
+	if perRepo["c3"] != 10 || perRepo["c4"] != 0 {
+		t.Errorf("sources per component = %v, want c3 10 and c4 none", perRepo)
 	}
 }
 

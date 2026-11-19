@@ -533,19 +533,32 @@ func resolveLine(ctx context.Context, rel Releaser, h Histories, pair []string, 
 	return rows, nil
 }
 
+// releaseShown is how many of each line's commits the sources hold: capped
+// per component and overall, in line order. The sources are cut by it and
+// the listing says the cut by it, so the two never disagree; it reads the
+// lines alone, so a re-explain from a stored scope says the same.
+func releaseShown(lines []ReleaseLine) []int {
+	shown := make([]int, len(lines))
+	used := 0
+	for i, l := range lines {
+		if l.Note != "" {
+			continue
+		}
+		shown[i] = min(l.Commits, releaseLimit, releaseTotal-used)
+		used += shown[i]
+	}
+	return shown
+}
+
 // releaseSources numbers the commits for the answer, component by
 // component in line order, newest first inside one, capped per component
 // and overall. A cut is said in the prompt, and the line keeps the count.
 func releaseSources(lines []ReleaseLine, commits map[string][]history.Commit) []Source {
 	var out []Source
-	for _, l := range lines {
+	shown := releaseShown(lines)
+	for i, l := range lines {
 		cs := commits[l.Image]
-		if len(cs) > releaseLimit {
-			cs = cs[:releaseLimit]
-		}
-		if room := releaseTotal - len(out); len(cs) > room {
-			cs = cs[:room]
-		}
+		cs = cs[:min(len(cs), shown[i])]
 		reason := fmt.Sprintf("release:%s %s..%s", l.Image, l.Versions[other(l, l.Ahead)], l.Versions[l.Ahead])
 		for _, s := range commitSources(cs) {
 			s.Reason = reason
@@ -596,13 +609,14 @@ func releaseDetail(lines []ReleaseLine, sources []Source, infra string, pair []s
 // reader's language.
 func releaseListing(lines []ReleaseLine, pair []string) string {
 	var b strings.Builder
-	for _, l := range lines {
+	shown := releaseShown(lines)
+	for i, l := range lines {
 		who := l.Repo
 		if who == "" {
 			who = l.Image
 		}
 		fmt.Fprintf(&b, "%s: %s %s, %s %s, %s\n", who,
-			pair[0], orNone(l.Versions[pair[0]]), pair[1], orNone(l.Versions[pair[1]]), noteEnglish(l))
+			pair[0], orNone(l.Versions[pair[0]]), pair[1], orNone(l.Versions[pair[1]]), noteEnglish(l, shown[i]))
 	}
 	return b.String()
 }
@@ -614,8 +628,9 @@ func orNone(v string) string {
 	return v
 }
 
-// noteEnglish is the line's clause for the prompt.
-func noteEnglish(l ReleaseLine) string {
+// noteEnglish is the line's clause for the prompt; shown is how many of its
+// commits the sources hold (releaseShown).
+func noteEnglish(l ReleaseLine, shown int) string {
 	switch l.Note {
 	case "":
 		n := "commit"
@@ -623,8 +638,12 @@ func noteEnglish(l ReleaseLine) string {
 			n = "commits"
 		}
 		cut := ""
-		if l.Commits > releaseLimit {
-			cut = fmt.Sprintf(" (the newest %d are among the sources)", releaseLimit)
+		switch {
+		case shown >= l.Commits:
+		case shown == 0:
+			cut = " (none of them are among the sources: the list was cut)"
+		default:
+			cut = fmt.Sprintf(" (the newest %d are among the sources)", shown)
 		}
 		return fmt.Sprintf("%s is ahead by %d %s%s", l.Ahead, l.Commits, n, cut)
 	case NoteUnchanged:
