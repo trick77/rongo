@@ -410,7 +410,11 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 			if errors.As(err, &cut) && len(report.Calls) > 0 {
 				report.Found, report.Concluded = g.conclude(ctx, msgs), true
 			}
-			return g.finishLocate(ctx, a, &report, shown, stage), report, nil
+			// Two statements, not one return: finishLocate writes the report,
+			// and Go leaves open whether a return list reads report before or
+			// after a call to its left.
+			out := g.finishLocate(ctx, a, &report, shown, stage)
+			return out, report, nil
 		}
 		if turn.Done() {
 			// What it concluded, having read what it found. Kept only when a
@@ -571,7 +575,8 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 		// which is the order a reader reads them in.
 		report.Steps = append(report.Steps, overLimit...)
 	}
-	return g.finishLocate(ctx, a, &report, shown, stage), report, nil
+	out := g.finishLocate(ctx, a, &report, shown, stage)
+	return out, report, nil
 }
 
 // completeCalls is what survives of a turn cut at the output cap: the calls
@@ -726,9 +731,15 @@ func (g *Gatherer) runLocateTool(ctx context.Context, call llm.ToolCall, sources
 		// narrow to one repository and would silently get the whole corpus.
 		// Said out loud instead, the way a named repository the index lacks
 		// is said out loud everywhere else.
-		if len(known) == 0 && !g.indexed(ctx, args.Repo) {
-			return step.refusedAs(call.Name+"("+args.Repo+": not in the index)", "that repository is not in the index"),
-				"That repository is not in the index, so nothing was looked up. The pattern may be right: call again without repo, or with a repository already among the sources.", "", nil, nil
+		if len(known) == 0 {
+			ok, err := g.indexed(ctx, args.Repo)
+			if err != nil {
+				return step, "", "", nil, err
+			}
+			if !ok {
+				return step.refusedAs(call.Name+"("+args.Repo+": not in the index)", "that repository is not in the index"),
+					"That repository is not in the index, so nothing was looked up. The pattern may be right: call again without repo, or with a repository already among the sources.", "", nil, nil
+			}
 		}
 		repos = []string{args.Repo}
 	}
@@ -978,11 +989,15 @@ func turnCeiling(known, hits []string, pm projects.Map) []string {
 // indexed reports whether the corpus carries a repository under that name and
 // has it enabled. A parked one is not a place to look: parking stops new
 // answers, and the read tool's own query says the same with enabled = 1.
-func (g *Gatherer) indexed(ctx context.Context, repo string) bool {
+// A read that failed is an error, never "not indexed": that answer goes to
+// the model as a fact about the corpus.
+func (g *Gatherer) indexed(ctx context.Context, repo string) (bool, error) {
 	var n int
-	err := g.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM repo_state WHERE name = ? AND enabled = 1`, repo).Scan(&n)
-	return err == nil && n > 0
+	if err := g.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM repo_state WHERE name = ? AND enabled = 1`, repo).Scan(&n); err != nil {
+		return false, fmt.Errorf("is %s indexed: %w", repo, err)
+	}
+	return n > 0, nil
 }
 
 // locateResult is what a search, symbol or read call reports back to the

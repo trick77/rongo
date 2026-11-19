@@ -228,3 +228,22 @@ func TestGather_neverFollowsACrossingItSkippedForTheCeiling(t *testing.T) {
 		t.Errorf("sources = %v, want neither the skipped crossing nor its far-side hop", repoPaths(got))
 	}
 }
+
+func TestIndexed_aBrokenDatabaseIsAnErrorNotARepositoryMissing(t *testing.T) {
+	// "Not in the index" is told to the model as a fact about the corpus. A
+	// read that failed is not that fact, and must not be reported as it.
+	db := gatherDB(t) // peeq among its repositories
+	g := NewGatherer(db, GatherOptions{TokenBudget: 1000})
+	ctx := context.Background()
+
+	if ok, err := g.indexed(ctx, "peeq"); err != nil || !ok {
+		t.Fatalf("indexed(peeq) = %v, %v; want true", ok, err)
+	}
+	if ok, err := g.indexed(ctx, "nowhere"); err != nil || ok {
+		t.Fatalf("indexed(nowhere) = %v, %v; want false", ok, err)
+	}
+	_ = db.Close()
+	if _, err := g.indexed(ctx, "peeq"); err == nil {
+		t.Fatal("indexed on a closed database = no error, want one")
+	}
+}
