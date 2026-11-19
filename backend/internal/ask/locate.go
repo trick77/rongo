@@ -355,12 +355,7 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 
 	// The full budget with the sources' cost recomputed, the way FillGaps
 	// rebuilds it: the reserve exists so there is room left under the ceiling.
-	a := &admitter{seen: map[int64]bool{}, budget: g.opts.TokenBudget, allowed: g.allowed()}
-	for _, s := range sources {
-		a.seen[s.ChunkID] = true
-		a.spent += estimateTokens(s.Text)
-	}
-	a.out = append(a.out, sources...)
+	a := g.admitterOver(sources, g.opts.TokenBudget)
 
 	msgs := []llm.ToolMessage{
 		{Role: "system", Content: locateSystem},

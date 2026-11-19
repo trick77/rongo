@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/trick77/rongo/internal/edges"
+	"github.com/trick77/rongo/internal/indexer"
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/sqlutil"
@@ -379,6 +379,19 @@ type admitter struct {
 	out    []Source
 	// allowed is the turn's ceiling; nil admits from any repository.
 	allowed map[string]bool
+}
+
+// admitterOver is an admitter that already holds sources, their cost
+// recomputed: a later phase rebuilds it under its own budget and the turn's
+// ceiling, so the room it reports is the room left under that budget.
+func (g *Gatherer) admitterOver(sources []Source, budget int) *admitter {
+	a := &admitter{seen: map[int64]bool{}, budget: budget, allowed: g.allowed()}
+	for _, s := range sources {
+		a.seen[s.ChunkID] = true
+		a.spent += estimateTokens(s.Text)
+	}
+	a.out = append(a.out, sources...)
+	return a
 }
 
 // take admits s at hop, or reports false when the budget cannot hold it. A
@@ -868,15 +881,9 @@ func identifiers(s string) []string {
 	return slices.Sorted(maps.Keys(edges.Identifiers(s)))
 }
 
-// estimateTokens is the same ~4-characters-per-token heuristic the chunker
-// uses, so a budget here means the same thing it does there.
-func estimateTokens(s string) int {
-	n := utf8.RuneCountInString(s)
-	if n == 0 {
-		return 0
-	}
-	return (n + 3) / 4
-}
+// estimateTokens is the chunker's own heuristic, so a budget here means the
+// same thing a chunk's size does there.
+var estimateTokens = indexer.EstimateTokens
 
 // inStage reports whether the stage restriction allows this path. A
 // repository absent from the restriction is not narrowed; one present keeps

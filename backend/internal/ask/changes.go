@@ -190,12 +190,17 @@ func changesBlock(scope Scope, audience Audience) string {
 	b.WriteString(`, newest first, each with its date, subject, message and the paths it touched. Nothing else was read: the code itself is not among the sources, so describe what the commits say was done, never how the code works now.
 
 Open with one sentence naming the window and the repositories covered, then the changes grouped by theme, newest first within a theme, each change with its date and its marker. A commit that carries a reason gives the reason. Where the sources span several repositories, say which change belongs to which. If the list holds ` + fmt.Sprint(changesLimit) + ` commits it was cut there; say so.`)
-	if audience == AudienceBA {
-		b.WriteString(` One line per change, in the language of the business domain: what the change means for the reader, not the files it touched.`)
-	} else {
-		b.WriteString(` Name the paths a change touched when they tell the reader where to look.`)
-	}
+	b.WriteString(commitLineRule(audience))
 	return b.String()
+}
+
+// commitLineRule is how one change reads, per audience, wherever an answer
+// is written from commits: the changes lane and the release notes.
+func commitLineRule(audience Audience) string {
+	if audience == AudienceBA {
+		return ` One line per change, in the language of the business domain: what the change means for the reader, not the files it touched.`
+	}
+	return ` Name the paths a change touched when they tell the reader where to look.`
 }
 
 // noChanges is the answer when the window holds no commit, in the reader's

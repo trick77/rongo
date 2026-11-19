@@ -668,11 +668,7 @@ func releaseBlock(scope Scope, audience Audience) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n\nThe question asks for RELEASE NOTES: what lies between two deployed versions, %s and %s, of each component of the product. The sources are commits between the two versions, per component, newest first, each with its date, subject, message and the paths it touched. Nothing else was read: the code itself is not among the sources, so describe what the commits say was done, never how the code works now.\n\nThe components, read from the infrastructure repository's overlays, one per line as \"repository: stage version, stage version, verdict\":\n\n%s\nOpen with one sentence naming the two stages and the components that differ. Then, per component that has commits, its two versions, then the changes grouped by theme, newest first within a theme, each with its date and its marker. A commit that carries a reason gives the reason. Close with one paragraph naming the components that are unchanged and those with a verdict other than commits, in the words of the list above; say nothing more about them, and never guess what a version not among the sources contains. A component whose list was cut is said to be cut.",
 		scope.Between[0], scope.Between[1], releaseListing(scope.Release, scope.Between))
-	if audience == AudienceBA {
-		b.WriteString(` One line per change, in the language of the business domain: what the change means for the reader, not the files it touched.`)
-	} else {
-		b.WriteString(` Name the paths a change touched when they tell the reader where to look.`)
-	}
+	b.WriteString(commitLineRule(audience))
 	return b.String()
 }
 

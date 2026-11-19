@@ -559,12 +559,16 @@ func (r *Router) Rank(ctx context.Context, hits []retrieve.Hit) (Ranked, error) 
 // grouping only feeds the trace's counts, and a GROUP BY scan per repository
 // is not worth paying for a number nobody decides on.
 func (r *Router) rankByPath(hits []retrieve.Hit) Ranked {
-	return rankWith(hits, func(_, path string) string {
-		if i := strings.LastIndexByte(path, '/'); i >= 0 {
-			return path[:i]
-		}
-		return "."
-	})
+	return rankWith(hits, func(_, path string) string { return dirOf(path) })
+}
+
+// dirOf is a path's directory, "." at the root: the module a path no
+// cluster holds is grouped under.
+func dirOf(path string) string {
+	if i := strings.LastIndexByte(path, '/'); i >= 0 {
+		return path[:i]
+	}
+	return "."
 }
 
 func rankWith(hits []retrieve.Hit, moduleOf func(repo, path string) string) Ranked {
@@ -1050,10 +1054,7 @@ func (r *Router) moduleLookup(ctx context.Context, hits []retrieve.Hit) (func(re
 		if key, ok := byRepo[repo][path]; ok {
 			return key
 		}
-		if i := strings.LastIndexByte(path, '/'); i >= 0 {
-			return path[:i]
-		}
-		return "."
+		return dirOf(path)
 	}, nil
 }
 
