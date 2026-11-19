@@ -337,9 +337,11 @@ func scanMaven(repo string, paths []string, read Read) (units []Unit, deps []Dep
 // up to its own closing brace. Not the buildscript's: its classpath is the
 // build's, not the module's. And not what follows a block: a forced version
 // in a resolution strategy names a coordinate the module may never use.
-// Braces are counted plainly; one inside a string is rare enough in a
-// dependencies block, and an unbalanced block runs to the end as before.
+// Comments are blanked first and a brace inside a string is not counted: a
+// "// see }" closed the block early and dropped what followed, and a
+// commented-out block is no block. An unbalanced block runs to the end.
 func gradleDependencies(s string) string {
+	s = blankGradleComments(s)
 	var skip [][2]int // buildscript blocks, and the blocks already taken
 	inside := func(at int) bool {
 		for _, r := range skip {
@@ -366,11 +368,14 @@ func gradleDependencies(s string) string {
 }
 
 // braceEnd is the index of the brace that closes the block opened just
-// before from, or len(s) when it never closes.
+// before from, or len(s) when it never closes. Braces inside a quoted string
+// are text; s has its comments blanked already.
 func braceEnd(s string, from int) int {
 	depth := 1
 	for i := from; i < len(s); i++ {
 		switch s[i] {
+		case '"', '\'':
+			i = stringEnd(s, i)
 		case '{':
 			depth++
 		case '}':
@@ -381,6 +386,52 @@ func braceEnd(s string, from int) int {
 		}
 	}
 	return len(s)
+}
+
+// stringEnd is the index of the quote closing the string opened at i, or the
+// end of its line: a Gradle string in a dependency line never spans lines,
+// and a stray quote must not swallow the rest of the file.
+func stringEnd(s string, i int) int {
+	q := s[i]
+	for j := i + 1; j < len(s); j++ {
+		switch s[j] {
+		case '\\':
+			j++
+		case q, '\n':
+			return j
+		}
+	}
+	return len(s)
+}
+
+// blankGradleComments replaces every // and /* */ comment with spaces,
+// newlines kept, so offsets stay where they were. A "//" inside a string, a
+// URL's, is not a comment.
+func blankGradleComments(s string) string {
+	b := []byte(s)
+	for i := 0; i < len(b); i++ {
+		switch {
+		case b[i] == '"' || b[i] == '\'':
+			i = stringEnd(s, i)
+		case b[i] == '/' && i+1 < len(b) && b[i+1] == '/':
+			for ; i < len(b) && b[i] != '\n'; i++ {
+				b[i] = ' '
+			}
+		case b[i] == '/' && i+1 < len(b) && b[i+1] == '*':
+			end := strings.Index(s[i+2:], "*/")
+			stop := len(b)
+			if end >= 0 {
+				stop = i + 2 + end + 2
+			}
+			for ; i < stop; i++ {
+				if b[i] != '\n' {
+					b[i] = ' '
+				}
+			}
+			i--
+		}
+	}
+	return string(b)
 }
 
 func first(re *regexp.Regexp, s string) string {

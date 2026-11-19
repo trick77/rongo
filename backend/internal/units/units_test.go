@@ -175,6 +175,39 @@ dependencies { runtimeOnly "org.postgresql:postgresql:42.7.0" }`,
 	}
 }
 
+func TestGradleDependencies_bracesInCommentsAndStringsDoNotCount(t *testing.T) {
+	// A brace in a comment or a string is text, not structure: counting it
+	// closed the block early and dropped what followed. A commented-out block
+	// is no block, and "//" inside a URL string is no comment.
+	s := `// dependencies { implementation "x.dead:commented:1" }
+dependencies {
+  implementation "a.b:first:1" // see }
+  /* } */ implementation "a.b:second:1"
+  implementation "a.b:brace:1}"
+  maven { url "https://repo.example.invalid/{x}" }
+  implementation project(':core')
+}
+configurations.all { resolutionStrategy.force "c.d:forced:1" }`
+	got := gradleDependencies(s)
+	for _, want := range []string{"a.b:first", "a.b:second", "a.b:brace", "project(':core')"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dependencies lack %q:\n%s", want, got)
+		}
+	}
+	for _, not := range []string{"x.dead:commented", "c.d:forced"} {
+		if strings.Contains(got, not) {
+			t.Errorf("dependencies carry %q:\n%s", not, got)
+		}
+	}
+	// An escaped quote does not end its string, and a comment that never
+	// closes blanks to the end.
+	got = gradleDependencies(`dependencies { x "q\"}"
+  implementation "a.b:after:1" } /* never closed "e.f:gone:1"`)
+	if !strings.Contains(got, "a.b:after") || strings.Contains(got, "e.f:gone") {
+		t.Errorf("escaped quote / open comment = %q", got)
+	}
+}
+
 func TestScan_aGoModuleInASubdirectoryIsAUnitAndTheRootIsNot(t *testing.T) {
 	paths, read := fixtureRead(map[string]string{
 		"go.mod":         "module github.com/example/root\n\ngo 1.22\n",
