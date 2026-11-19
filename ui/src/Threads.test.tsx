@@ -557,6 +557,31 @@ describe("Threads", () => {
       ).toBeNull();
     });
 
+    it("drops a thread another tab deleted already instead of hanging in the dialog", async () => {
+      threadList(two);
+      const onDeleted = vi.fn();
+      render(
+        <Threads
+          activeId={null}
+          onSelect={() => {}}
+          version={0}
+          onDeleted={onDeleted}
+        />,
+      );
+      const user = await openMenu("How does shipping work?");
+      await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+      // The thread is gone on the server: what the reader asked for is done.
+      (fetch as unknown as Mock).mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+      });
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+
+      expect(onDeleted).toHaveBeenCalledWith("7");
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
     it("leaves the row alone when the delete is cancelled", async () => {
       threadList(two);
       render(<Threads activeId={null} onSelect={() => {}} version={0} />);
