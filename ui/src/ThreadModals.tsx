@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useEscape } from "./dialog";
+import { useBackdropDismiss } from "./dismiss";
 import { createPortal } from "react-dom";
 
 /**
@@ -26,6 +27,11 @@ export function ModalShell({
 }) {
   const titleID = useId();
   useEscape(onCancel);
+  const {
+    ref: scrim,
+    onPointerDown,
+    onPointerUp,
+  } = useBackdropDismiss(onCancel);
   // Mounted on the body, not where it is written. The rail these dialogs
   // open from is a drawer that slides, and a translated ancestor is the
   // containing block for everything fixed inside it — `inset-0` resolved to
@@ -47,11 +53,12 @@ export function ModalShell({
       // and the Repos page has none — the offset was right at one width of
       // one page and visibly off everywhere else.
       className="fixed inset-0 z-[60] grid place-items-center bg-black/50 px-4 backdrop-blur-[2px]"
-      // Only the backdrop itself dismisses: a click that started inside the
-      // dialog and ended on the backdrop is a drag, not a cancel.
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
+      // Only a press that starts and ends on the backdrop dismisses. A drag
+      // out of the dialog — selecting the half-typed title — clicks the
+      // backdrop too, so the target alone cannot tell (useBackdropDismiss).
+      ref={scrim}
+      onPointerDown={onPointerDown}
+      onPointerUp={onPointerUp}
     >
       <div
         role="dialog"

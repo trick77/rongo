@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -629,8 +630,8 @@ func (s *Store) SearchSubstringsIn(ctx context.Context, terms []string, n int, r
 	// Only what survived the cut is read in full, from the snapshot the ids
 	// were read in.
 	byID := make(map[int64]Hit, len(want))
-	for start := 0; start < len(want); start += substringFetchBatch {
-		batch := want[start:min(start+substringFetchBatch, len(want))]
+	// Chunked whatever the term count and the cut multiply to.
+	for batch := range slices.Chunk(want, sqlutil.InChunk) {
 		//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
 		q := `SELECT ` + hitColumns + `
 			FROM chunks c
@@ -648,10 +649,6 @@ func (s *Store) SearchSubstringsIn(ctx context.Context, terms []string, n int, r
 	}
 	return out, nil
 }
-
-// substringFetchBatch keeps the id list of one read well under SQLite's bound
-// on host parameters, whatever the term count and the cut multiply to.
-const substringFetchBatch = 500
 
 func readHits(ctx context.Context, tx *sql.Tx, q string, args []any, into map[int64]Hit) error {
 	rows, err := tx.QueryContext(ctx, q, args...)

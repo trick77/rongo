@@ -1,9 +1,12 @@
 /** What a failed response says to the reader: the server's own message when
  * it wrote one (not in the checkout, too long, binary), else the status. A
  * bare status is not a message. The server answers in the family's shape,
- * {"error": "..."}; a plain-text body is read as it is. */
+ * {"error": "..."}; a plain-text body is read as it is. Markup is not a
+ * message: a proxy answering for a backend that is not there sends its HTML
+ * error page, and the status says more than that page's source. */
 export async function serverMessage(res: Response): Promise<string> {
   const text = (await res.text()).trim();
+  if (text.startsWith("<")) return `The server answered with ${res.status}.`;
   if (text.startsWith("{")) {
     try {
       const body: unknown = JSON.parse(text);

@@ -27,7 +27,15 @@ export function applyEvent(
       // not always the one that was asked for — a thread answers in the
       // language of its first turn — so the turn on screen, and with it the
       // composer, follow the server rather than the guess.
-      return { ...t, recorded: true, language: payload.language ?? t.language };
+      return {
+        ...t,
+        recorded: true,
+        language: payload.language ?? t.language,
+        recordedAs:
+          typeof payload.message_id === "number"
+            ? payload.message_id
+            : t.recordedAs,
+      };
     case "status":
       return withStep(
         t,

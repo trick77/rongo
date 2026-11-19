@@ -215,7 +215,7 @@ describe("Ask", () => {
 
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain("a.go");
-    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toBe(
+    expect(sourceRequest(fetchMock)).toBe(
       "/api/source?repo=peeq&path=internal%2Fa.go&sha=0123abcdef",
     );
     await screen.findByText("b");
@@ -477,6 +477,17 @@ describe("Ask, the Sources pane", () => {
  * /api/ask and reads a stored thread from /api/threads/{id}. A stub that
  * answered both the same way would let a component that confuses them pass.
  */
+/** The URL the source viewer asked for. By URL, never by position: the turn
+ * and the thread go on fetching after the stub is in place (the feedback,
+ * the rail after done), and under load one of those lands first. */
+function sourceRequest(fetchMock: { mock: { calls: unknown[][] } }): string {
+  return (
+    fetchMock.mock.calls
+      .map((c) => String(c[0]))
+      .find((u) => u.startsWith("/api/source")) ?? ""
+  );
+}
+
 function routedFetch(messages: unknown, frames: string[] = []) {
   const encoder = new TextEncoder();
   const mock = vi.fn(async (url: string, _opts?: RequestInit) => {
@@ -747,9 +758,7 @@ describe("Ask, a stored thread", () => {
     expect(dialog.getAttribute("aria-label")).toContain(
       "playbackgrant/store.go",
     );
-    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain(
-      "playbackgrant%2Fstore.go",
-    );
+    expect(sourceRequest(fetchMock)).toContain("playbackgrant%2Fstore.go");
   });
 
   it("restores the role the question was answered in", async () => {
@@ -2604,6 +2613,30 @@ describe("Ask, retrying a failed turn", () => {
     });
   });
 
+  it("asks again as the same question when the stream dropped after the record", async () => {
+    // A proxy FIN after the thread event: no error, no done, so the id came
+    // only with the thread event.
+    const mock = queuedPostFetch([
+      [
+        ev("thread", { thread_id: "1", message_id: 5 }),
+        ev("status", { step: "answering" }),
+      ],
+      [
+        ev("thread", { thread_id: "1", message_id: 6 }),
+        ev("token", { text: "The answer." }),
+        ev("done", { message_id: 6 }),
+      ],
+    ]);
+
+    const user = await ask("How?");
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+
+    await screen.findByText("The answer.");
+    expect(screen.getAllByRole("article").length).toBe(1);
+    const posts = mock.mock.calls.filter((c) => c[0] === "/api/ask");
+    expect(JSON.parse(String(posts[1][1]?.body)).head_message_id).toBe(5);
+  });
+
   it("holds the retry while another turn is streaming", async () => {
     const stream = pushableStream();
     const user = userEvent.setup();
@@ -2648,6 +2681,47 @@ describe("Ask, retrying a failed turn", () => {
       ),
     );
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("says what the server said when it refuses the question", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 400,
+        text: async () => '{"error":"the question is too long"}',
+      })),
+    );
+
+    await ask("How?");
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "the question is too long",
+      ),
+    );
+  });
+
+  it("says the status, not a proxy's error page, when the backend is not there", async () => {
+    // A restart behind the proxy: a 502 whose body is the proxy's HTML.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 502,
+        text: async () =>
+          "<html><head><title>502 Bad Gateway</title></head></html>",
+      })),
+    );
+
+    await ask("How?");
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "The server answered with 502.",
+      ),
+    );
+    expect(screen.getByRole("alert").textContent).not.toContain("<html>");
   });
 
   it("offers no retry on a turn that answered", async () => {

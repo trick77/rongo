@@ -1,10 +1,13 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -299,5 +302,53 @@ func TestAsk_aTemplatedAnswerReachesTheBrowserLive(t *testing.T) {
 	}
 	if tokens != 2 {
 		t.Fatalf("%d token events, want the two streamed and nothing appended", tokens)
+	}
+}
+
+// memoryLinkFailingThreads is a store whose turn row is gone: the memory
+// link hangs off it, so writing the link fails.
+type memoryLinkFailingThreads struct {
+	*threads.Store
+}
+
+func (memoryLinkFailingThreads) SetMemory(context.Context, int64, int64) error {
+	return errors.New("FOREIGN KEY constraint failed")
+}
+
+func TestOnMemory_saysNothingWhenTheThreadWasDeletedMidTurn(t *testing.T) {
+	// Given a thread deleted while its turn saved a rule: the record context
+	// outlives the request, so only the TURN's context knows why the link
+	// write failed.
+	var log bytes.Buffer
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&log, nil)))
+	t.Cleanup(func() { slog.SetDefault(restore) })
+
+	deps, st, db := testDeps(t)
+	deps.Memory = memory.NewStore(db)
+	deps.Threads = memoryLinkFailingThreads{Store: st}
+	srv := NewServer(deps)
+	ctx := context.Background()
+	th, err := st.Create(ctx, testSubject, "frage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := st.AddQuestion(ctx, th.ID, "ba", "de", "frage", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, cancel := context.WithCancelCause(ctx)
+	cancel(errThreadDeleted)
+	record := context.WithoutCancel(turn)
+
+	// When
+	onMemory := srv.onMemory(turn, record, testSubject, msg.ID, func(string, any) {})
+	if _, err := onMemory(memory.Directive{Text: "Never draw flowchart diagrams."}); err != nil {
+		t.Fatalf("onMemory: %v", err)
+	}
+
+	// Then the deliberate delete is not logged as an error
+	if log.Len() != 0 {
+		t.Errorf("log = %q, want silence for a deleted thread", log.String())
 	}
 }

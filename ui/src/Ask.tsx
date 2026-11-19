@@ -12,7 +12,7 @@ import ThreadView, {
   SourcesPane,
 } from "./ThreadView";
 import CitationViewer from "./CitationViewer";
-import { copyText } from "./http";
+import { copyText, serverMessage } from "./http";
 import { pageColumn } from "./page";
 import { StatsPane } from "./StatsPane";
 import LanguageSelect from "./LanguageSelect";
@@ -602,8 +602,16 @@ export default function Ask({
     // nothing patched the turn, so the trace ticked on with no answer, no
     // error and no way out.
     let closed = false;
+    // A turn the record already holds keeps its id when it fails, the way the
+    // error event hands it over: Retry is then another attempt at that row.
     const fail = (error: string) =>
-      patchLast((t) => ({ ...t, error, done: true, endedAt: Date.now() }));
+      patchLast((t) => ({
+        ...t,
+        error,
+        done: true,
+        endedAt: Date.now(),
+        messageId: t.messageId ?? t.recordedAs ?? null,
+      }));
     // The request the turn was made with, so a failure can be asked again. A
     // resume passes retryable false: its card unlocks itself on failure, and a
     // button beside the error would be a second way to spend the same call.
@@ -615,7 +623,11 @@ export default function Ask({
         body: JSON.stringify(body),
       });
       if (!res.ok || !res.body) {
-        fail(`The server answered with ${res.status}.`);
+        // The refusal says why — too long, being answered, no such thread —
+        // and the reader can act on that, not on a bare status. A body that
+        // cannot be read falls back to the status rather than to "lost".
+        const status = `The server answered with ${res.status}.`;
+        fail(res.ok ? status : await serverMessage(res).catch(() => status));
         ok = false;
         return false;
       }

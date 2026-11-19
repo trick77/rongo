@@ -93,8 +93,9 @@ type wireMemory struct {
 // onMemory is the pipeline's OnMemory for one turn: write the directive under
 // the reader, link it to the turn, tell the browser. record outlives the
 // request, so a rule the reader gave is kept even when they closed the tab
-// before the answer.
-func (s *Server) onMemory(record context.Context, subject string, messageID int64, send func(string, any)) func(memory.Directive) (memory.Added, error) {
+// before the answer. turn is the request's context, read only to tell a
+// thread deleted mid-turn from a write that really failed (recordFailed).
+func (s *Server) onMemory(turn, record context.Context, subject string, messageID int64, send func(string, any)) func(memory.Directive) (memory.Added, error) {
 	if s.deps.Memory == nil {
 		return nil
 	}
@@ -110,7 +111,7 @@ func (s *Server) onMemory(record context.Context, subject string, messageID int6
 		}
 		if added.Row.ID != 0 {
 			if err := s.deps.Threads.SetMemory(record, messageID, added.Row.ID); err != nil {
-				recordFailed(record, "record memory link failed", err)
+				recordFailed(turn, "record memory link failed", err)
 			}
 		}
 		send("memory", wireMemory{

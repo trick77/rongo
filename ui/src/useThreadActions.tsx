@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 
-import { serverMessage } from "./http";
+import { goneOk, serverMessage } from "./http";
 import type { Thread } from "./Threads";
 import { DeleteThreadModal, RenameThreadModal } from "./ThreadModals";
 import ShareDialog from "./share/ShareDialog";
@@ -109,7 +109,8 @@ export function useThreadActions({
     setPending(true);
     try {
       const res = await fetch(`/api/threads/${t.id}`, { method: "DELETE" });
-      if (!res.ok) return;
+      // A 404 is a thread another tab deleted already: what was asked is done.
+      if (!goneOk(res)) return;
       setDeleting(null);
       onDeleted(t.id);
     } catch {

@@ -62,6 +62,32 @@ describe("SharedLinks", () => {
     expect(screen.getByText("Live")).toBeTruthy();
   });
 
+  it("counts calendar days, not 24-hour spans", async () => {
+    // Given a link updated this morning, read in the evening of the same day
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 4, 21, 0));
+    try {
+      listing([
+        { ...live, updated_at: new Date(2026, 8, 4, 8, 0).toISOString() },
+        {
+          ...live,
+          token: "older",
+          path: "/share/older",
+          updated_at: new Date(2026, 8, 3, 23, 30).toISOString(),
+        },
+      ]);
+
+      // When
+      render(<SharedLinks onOpenThread={() => {}} />);
+
+      // Then thirteen hours ago is today, and last night is yesterday
+      expect(await screen.findByText("today")).toBeTruthy();
+      expect(screen.getByText("yesterday")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("marks a link the thread has moved on from", async () => {
     listing([{ ...live, newer: 3 }]);
     render(<SharedLinks onOpenThread={() => {}} />);

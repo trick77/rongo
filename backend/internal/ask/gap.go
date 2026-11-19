@@ -182,12 +182,7 @@ func (g *Gatherer) FillGaps(ctx context.Context, question string, sources []Sour
 	if g.locate != nil {
 		budget -= g.opts.TokenBudget / locateReserve
 	}
-	a := &admitter{seen: map[int64]bool{}, budget: budget, allowed: g.allowed()}
-	for _, s := range sources {
-		a.seen[s.ChunkID] = true
-		a.spent += estimateTokens(s.Text)
-	}
-	a.out = append(a.out, sources...)
+	a := g.admitterOver(sources, budget)
 
 	// The stage and the turn's ceiling go INTO the lookups, before the
 	// per-name cap: applied after, four out-of-scope definitions fill the cap

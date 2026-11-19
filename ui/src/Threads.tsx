@@ -41,13 +41,20 @@ export type Thread = {
   starred?: boolean;
 };
 
+/** How many calendar days lie between d and now, in local time: last night
+ * is one day ago even when it was three hours ago. Rounded, not floored,
+ * because a daylight-saving day is 23 or 25 hours long. */
+export function daysAgo(d: Date, now = new Date()): number {
+  const day = (x: Date) =>
+    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  return Math.round((day(now) - day(d)) / 86400000);
+}
+
 /** The day group a thread lands in, in the words the rail uses. */
 export function group(iso: string, now = new Date()): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "Earlier";
-  const day = (x: Date) =>
-    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diff = Math.round((day(now) - day(d)) / 86400000);
+  const diff = daysAgo(d, now);
   if (diff <= 0) return "Today";
   if (diff === 1) return "Yesterday";
   if (diff < 7) return "This week";

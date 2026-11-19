@@ -74,6 +74,15 @@ func TestCensus_landsEveryLinkSiteOfTheRepositoryAndWalksFromThem(t *testing.T) 
 	if strings.Contains(census.Listing, "elsewhere") {
 		t.Errorf("listing carries another repository:\n%s", census.Listing)
 	}
+	// A re-explain needs the listing alone, read the same way, without
+	// looking up a landing chunk per site.
+	listing, err := g.LinkListing(context.Background(), []string{"claims-ui"})
+	if err != nil {
+		t.Fatalf("LinkListing: %v", err)
+	}
+	if listing != census.Listing {
+		t.Errorf("LinkListing = %q, want the census's %q", listing, census.Listing)
+	}
 }
 
 func TestCensus_capsTheLandingsAndListsTheRest(t *testing.T) {
@@ -259,6 +268,34 @@ func TestReexplainRebuildsTheLinkListing(t *testing.T) {
 	}
 	if !strings.Contains(*prompt, "https://portal.example.ch  claims-ui/src/nav.html:7") {
 		t.Errorf("a re-explained census must carry the listing:\n%s", *prompt)
+	}
+
+	// A broken index fails the re-explain, never answers without the listing.
+	_ = db.Close()
+	if _, err := p.Reexplain(context.Background(), "frage", AudienceDev, LanguageEN,
+		[]Source{{ChunkID: 1, Repo: "claims-ui", Path: "src/nav.html", Text: "<a>", StartLine: 1, EndLine: 1}},
+		Scope{Known: []string{"claims-ui"}, Census: CensusLink}, Events{}); err == nil {
+		t.Error("reexplain over a closed database = no error, want one")
+	}
+}
+
+// The listing alone, read like the census reads it: nothing to list is no
+// block, and a failed read is an error, never an empty listing.
+func TestLinkListing_emptyAndBroken(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "claims-ui")
+	g := NewGatherer(db, GatherOptions{TokenBudget: 24000})
+	ctx := context.Background()
+
+	if got, err := g.LinkListing(ctx, []string{"claims-ui"}); err != nil || got != "" {
+		t.Fatalf("LinkListing with no sites = %q, %v; want empty", got, err)
+	}
+	_ = db.Close()
+	if _, err := g.LinkListing(ctx, []string{"claims-ui"}); err == nil {
+		t.Error("LinkListing on a closed database = no error, want one")
+	}
+	if _, err := g.LinkCensus(ctx, []string{"claims-ui"}); err == nil {
+		t.Error("LinkCensus on a closed database = no error, want one")
 	}
 }
 

@@ -81,22 +81,13 @@ func (s *Server) handleSearchThreads(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
-	u, id, ok := s.threadTarget(w, r)
-	if !ok {
-		return
-	}
 	// Owns before Messages, unlike the routes below, which carry the owner
 	// inside their own statement. Messages answers an empty list for a thread
 	// that is not this reader's, and an empty list is a 200 — so without this
 	// the one route that reads a thread would tell "no such address" and
 	// "exists, but not yours" apart, while every other one answers 404 to both.
-	owns, err := s.deps.Threads.Owns(r.Context(), u.Subject, id)
-	if err != nil {
-		serverError(w, r, "check thread owner failed", err)
-		return
-	}
-	if !owns {
-		httpx.WriteError(w, http.StatusNotFound, "no such thread")
+	u, id, ok := s.ownedThread(w, r)
+	if !ok {
 		return
 	}
 	msgs, err := s.deps.Threads.Messages(r.Context(), u.Subject, id)
@@ -232,6 +223,26 @@ func (s *Server) threadTarget(w http.ResponseWriter, r *http.Request) (auth.User
 		return auth.User{}, 0, false
 	}
 	if !ok {
+		httpx.WriteError(w, http.StatusNotFound, "no such thread")
+		return auth.User{}, 0, false
+	}
+	return u, id, true
+}
+
+// ownedThread is threadTarget for a read whose own statement does not carry
+// the owner: it checks ownership first, so "exists, but not yours" answers
+// the same 404 as "no such address".
+func (s *Server) ownedThread(w http.ResponseWriter, r *http.Request) (auth.User, int64, bool) {
+	u, id, ok := s.threadTarget(w, r)
+	if !ok {
+		return auth.User{}, 0, false
+	}
+	owns, err := s.deps.Threads.Owns(r.Context(), u.Subject, id)
+	if err != nil {
+		serverError(w, r, "check thread owner failed", err)
+		return auth.User{}, 0, false
+	}
+	if !owns {
 		httpx.WriteError(w, http.StatusNotFound, "no such thread")
 		return auth.User{}, 0, false
 	}

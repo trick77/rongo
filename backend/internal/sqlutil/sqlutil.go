@@ -6,6 +6,12 @@ package sqlutil
 
 import "strings"
 
+// InChunk is how many values one IN list binds: a read that grows with its
+// input (a thread's messages, a commit's files, a repository's hashes) runs
+// in slices.Chunk(values, InChunk). SQLite's variable limit is far above it;
+// a read that grows should not be the one that finds the limit.
+const InChunk = 500
+
 // Placeholders is n bind parameters for an IN list: "?,?,?", and empty for
 // none.
 //

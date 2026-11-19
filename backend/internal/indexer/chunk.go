@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/trick77/rongo/internal/symbols"
 )
@@ -58,12 +59,13 @@ func DefaultChunkOptions() ChunkOptions {
 	return ChunkOptions{TargetTokens: 600, MaxTokens: 800, OverlapTokens: 75}
 }
 
-// estimateTokens approximates the token count of s. Real BPE tokenization would
+// EstimateTokens approximates the token count of s. Real BPE tokenization would
 // need a runtime vocabulary download (tiktoken), which this deployment cannot
 // rely on; ~4 characters per token is the standard heuristic and is accurate
-// enough to size chunks and the embedding budget.
-func estimateTokens(s string) int {
-	n := len([]rune(s))
+// enough to size chunks and the embedding budget. The gather budget counts
+// with it too, so a budget there means what a chunk's size means here.
+func EstimateTokens(s string) int {
+	n := utf8.RuneCountInString(s)
 	if n == 0 {
 		return 0
 	}
@@ -443,7 +445,7 @@ func windows(lines []string, from, to int, opts ChunkOptions) []span {
 		end := start
 		tokens := 0
 		for end <= to {
-			t := estimateTokens(lines[end-1]) + 1 // +1 for the newline
+			t := EstimateTokens(lines[end-1]) + 1 // +1 for the newline
 			if end > start && tokens+t > opts.TargetTokens {
 				break
 			}
@@ -459,7 +461,7 @@ func windows(lines []string, from, to int, opts ChunkOptions) []span {
 		// make at least one line of progress so this cannot loop forever.
 		back, ov := end, 0
 		for back > start && ov < opts.OverlapTokens {
-			ov += estimateTokens(lines[back-1]) + 1
+			ov += EstimateTokens(lines[back-1]) + 1
 			back--
 		}
 		next := back + 1
@@ -488,7 +490,7 @@ func (o ChunkOptions) Splits(raw string) bool {
 // FILE, not just that line. Cutting it here keeps every byte in the index and
 // costs only a boundary in the middle of a line nobody reads anyway.
 func splitOverlongLine(raw string, maxTokens int) []string {
-	if maxTokens <= 0 || estimateTokens(raw) <= maxTokens {
+	if maxTokens <= 0 || EstimateTokens(raw) <= maxTokens {
 		return []string{raw}
 	}
 	runes := []rune(raw)

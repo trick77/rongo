@@ -1300,15 +1300,12 @@ func (p *Pipeline) Resume(ctx context.Context, question string, audience Audienc
 	// The stored hits replay without a search, so nothing else would notice a
 	// repository parked or purged since the card was asked: it would answer
 	// again from them. Refused the way ResumeRepo refuses a chosen one.
-	var hitRepos []string
-	for _, h := range hits {
-		hitRepos = append(hitRepos, h.Repo)
-	}
-	known, _, err := p.search.ResolveRepos(ctx, hitRepos, "")
+	named := hitRepoNames(hits)
+	known, _, err := p.search.ResolveRepos(ctx, named, "")
 	if err != nil {
 		return Answer{}, fmt.Errorf("resolve the card's repositories: %w", err)
 	}
-	if gone := missingRepos(hitRepos, known); len(gone) > 0 {
+	if gone := missingRepos(named, known); len(gone) > 0 {
 		return Answer{}, p.unresolved(ctx, gone, "the card's repositories %s are no longer in the index")
 	}
 
@@ -1422,12 +1419,14 @@ func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audi
 	scope.Processes = p.describeProcesses(ctx, sources)
 	// The link listing too, for the same reason: it is never persisted, and
 	// the record says the turn was a census. Read again from the index, not
-	// re-gathered — the sources are the first turn's.
-	census, err := p.census(ctx, scope)
-	if err != nil {
-		return Answer{}, err
+	// re-gathered — the sources are the first turn's, so the listing alone.
+	if scope.Census == CensusLink && len(scope.Known) > 0 {
+		links, err := p.gatherer.LinkListing(ctx, scope.Known)
+		if err != nil {
+			return Answer{}, err
+		}
+		scope.Links = links
 	}
-	scope.Links = census.Listing
 	// No follow-up rule, on purpose: a re-explain answers the SAME question
 	// again for the other audience, and the first answer is right above it in
 	// the thread. Telling the model not to restate what was already explained

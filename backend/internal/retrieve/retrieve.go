@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"iter"
 	"log/slog"
 	"slices"
 	"sort"
@@ -444,17 +445,31 @@ func spellings(name string) []string {
 // carriesWholeWord reports whether the lower-cased question holds name with a
 // nameRune on neither side.
 func carriesWholeWord(q, name string) bool {
-	for i := 0; ; {
-		j := strings.Index(q[i:], name)
-		if j < 0 {
-			return false
+	for range wholeAt(q, name, nameRune) {
+		return true
+	}
+	return false
+}
+
+// wholeAt yields where s holds name with no is-rune on either side, left to
+// right. The one scan every whole-word test here shares; is decides whether
+// the hyphen is part of a word.
+func wholeAt(s, name string, is func(rune) bool) iter.Seq[int] {
+	return func(yield func(int) bool) {
+		if name == "" {
+			return
 		}
-		start := i + j
-		end := start + len(name)
-		if !wordBefore(q, start, nameRune) && !wordAfter(q, end, nameRune) {
-			return true
+		for i := 0; ; {
+			j := strings.Index(s[i:], name)
+			if j < 0 {
+				return
+			}
+			start := i + j
+			if !wordBefore(s, start, is) && !wordAfter(s, start+len(name), is) && !yield(start) {
+				return
+			}
+			i = start + 1
 		}
-		i = start + 1
 	}
 }
 
@@ -671,18 +686,10 @@ func mentions(question, repo string) bool {
 	if commonWords[name] {
 		return false
 	}
-	for i := 0; ; {
-		j := strings.Index(q[i:], name)
-		if j < 0 {
-			return false
-		}
-		start := i + j
-		end := start + len(name)
-		if !wordBefore(q, start, wordRune) && !wordAfter(q, end, wordRune) {
-			return true
-		}
-		i = start + 1
+	for range wholeAt(q, name, wordRune) {
+		return true
 	}
+	return false
 }
 
 // withoutMembers is the question, lower-cased, with every whole mention of a
@@ -695,17 +702,10 @@ func withoutMembers(question, project string, members []string) string {
 		if name == strings.ToLower(project) {
 			continue
 		}
-		for i := 0; ; {
-			j := strings.Index(q[i:], name)
-			if j < 0 {
-				break
-			}
-			start := i + j
-			end := start + len(name)
-			if !wordBefore(q, start, nameRune) && !wordAfter(q, end, nameRune) {
-				q = q[:start] + strings.Repeat(" ", len(name)) + q[end:]
-			}
-			i = start + 1
+		// Collected first, blanked after: blanking keeps every length, so
+		// the places stay where they were found.
+		for _, start := range slices.Collect(wholeAt(q, name, nameRune)) {
+			q = q[:start] + strings.Repeat(" ", len(name)) + q[start+len(name):]
 		}
 	}
 	return q

@@ -686,7 +686,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	events := tr.events()
 	events.OnNotice = func(text string) { send("notice", map[string]any{"text": text}) }
-	events.OnMemory = s.onMemory(record, u.Subject, msg.ID, send)
+	events.OnMemory = s.onMemory(ctx, record, u.Subject, msg.ID, send)
 
 	if resume != nil {
 		// The resumed turn is a turn of its own: it says what its scope was
