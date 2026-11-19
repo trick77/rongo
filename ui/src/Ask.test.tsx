@@ -215,7 +215,7 @@ describe("Ask", () => {
 
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain("a.go");
-    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toBe(
+    expect(sourceRequest(fetchMock)).toBe(
       "/api/source?repo=peeq&path=internal%2Fa.go&sha=0123abcdef",
     );
     await screen.findByText("b");
@@ -477,6 +477,17 @@ describe("Ask, the Sources pane", () => {
  * /api/ask and reads a stored thread from /api/threads/{id}. A stub that
  * answered both the same way would let a component that confuses them pass.
  */
+/** The URL the source viewer asked for. By URL, never by position: the turn
+ * and the thread go on fetching after the stub is in place (the feedback,
+ * the rail after done), and under load one of those lands first. */
+function sourceRequest(fetchMock: { mock: { calls: unknown[][] } }): string {
+  return (
+    fetchMock.mock.calls
+      .map((c) => String(c[0]))
+      .find((u) => u.startsWith("/api/source")) ?? ""
+  );
+}
+
 function routedFetch(messages: unknown, frames: string[] = []) {
   const encoder = new TextEncoder();
   const mock = vi.fn(async (url: string, _opts?: RequestInit) => {
@@ -747,9 +758,7 @@ describe("Ask, a stored thread", () => {
     expect(dialog.getAttribute("aria-label")).toContain(
       "playbackgrant/store.go",
     );
-    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain(
-      "playbackgrant%2Fstore.go",
-    );
+    expect(sourceRequest(fetchMock)).toContain("playbackgrant%2Fstore.go");
   });
 
   it("restores the role the question was answered in", async () => {
