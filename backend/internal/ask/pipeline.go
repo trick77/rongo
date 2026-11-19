@@ -1422,12 +1422,14 @@ func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audi
 	scope.Processes = p.describeProcesses(ctx, sources)
 	// The link listing too, for the same reason: it is never persisted, and
 	// the record says the turn was a census. Read again from the index, not
-	// re-gathered — the sources are the first turn's.
-	census, err := p.census(ctx, scope)
-	if err != nil {
-		return Answer{}, err
+	// re-gathered — the sources are the first turn's, so the listing alone.
+	if scope.Census == CensusLink && len(scope.Known) > 0 {
+		links, err := p.gatherer.LinkListing(ctx, scope.Known)
+		if err != nil {
+			return Answer{}, err
+		}
+		scope.Links = links
 	}
-	scope.Links = census.Listing
 	// No follow-up rule, on purpose: a re-explain answers the SAME question
 	// again for the other audience, and the first answer is right above it in
 	// the thread. Telling the model not to restate what was already explained

@@ -53,13 +53,9 @@ type Census struct {
 // rung refuses, and it refuses it here the same way.
 func (g *Gatherer) LinkCensus(ctx context.Context, repos []string) (Census, error) {
 	var c Census
-	var rows []edges.Neighbour
-	for _, repo := range repos {
-		ns, err := edges.InRepo(ctx, g.db, repo, edges.KindLink)
-		if err != nil {
-			return Census{}, fmt.Errorf("read the link sites of %s: %w", repo, err)
-		}
-		rows = append(rows, ns...)
+	rows, err := g.linkSites(ctx, repos)
+	if err != nil {
+		return Census{}, err
 	}
 	c.Sites = len(rows)
 	if c.Sites == 0 {
@@ -98,6 +94,33 @@ func (g *Gatherer) LinkCensus(ctx context.Context, repos []string) (Census, erro
 	}
 	c.Listing = linkListing(rows)
 	return c, nil
+}
+
+// LinkListing is LinkCensus's listing alone: a re-explain answers from the
+// first turn's sources, so the landings would be looked up only to be
+// thrown away, one chunk query per site.
+func (g *Gatherer) LinkListing(ctx context.Context, repos []string) (string, error) {
+	rows, err := g.linkSites(ctx, repos)
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", nil
+	}
+	return linkListing(rows), nil
+}
+
+// linkSites is every link site of the named repositories.
+func (g *Gatherer) linkSites(ctx context.Context, repos []string) ([]edges.Neighbour, error) {
+	var rows []edges.Neighbour
+	for _, repo := range repos {
+		ns, err := edges.InRepo(ctx, g.db, repo, edges.KindLink)
+		if err != nil {
+			return nil, fmt.Errorf("read the link sites of %s: %w", repo, err)
+		}
+		rows = append(rows, ns...)
+	}
+	return rows, nil
 }
 
 // censusMaxPlaces is how many places one value names before the rest are
