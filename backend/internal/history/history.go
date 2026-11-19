@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -242,26 +243,12 @@ func (s *Store) BySHAs(ctx context.Context, repo string, shas []string) ([]Commi
 	if len(shas) == 0 {
 		return []Commit{}, nil
 	}
-	args := append([]any{repo}, sqlutil.Args(shas)...)
-	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT `+commitColumns+`
-		FROM commits c JOIN repo_state r ON r.name = c.repo
-		WHERE c.repo = ? AND c.sha IN (`+sqlutil.Placeholders(len(shas))+`)`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("commits by sha: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
+	// Chunked: a release range is as long as the history depth allows.
 	by := map[string]Commit{}
-	for rows.Next() {
-		c, err := scanCommit(rows)
-		if err != nil {
+	for part := range slices.Chunk(shas, sqlutil.InChunk) {
+		if err := s.commitsBySHA(ctx, repo, part, by); err != nil {
 			return nil, err
 		}
-		by[c.SHA] = c
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	out := make([]Commit, 0, len(by))
 	for _, sha := range shas {
@@ -270,6 +257,28 @@ func (s *Store) BySHAs(ctx context.Context, repo string, shas []string) ([]Commi
 		}
 	}
 	return out, nil
+}
+
+// commitsBySHA reads one chunk of BySHAs into by.
+func (s *Store) commitsBySHA(ctx context.Context, repo string, shas []string, by map[string]Commit) error {
+	args := append([]any{repo}, sqlutil.Args(shas)...)
+	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+commitColumns+`
+		FROM commits c JOIN repo_state r ON r.name = c.repo
+		WHERE c.repo = ? AND c.sha IN (`+sqlutil.Placeholders(len(shas))+`)`, args...)
+	if err != nil {
+		return fmt.Errorf("commits by sha: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		c, err := scanCommit(rows)
+		if err != nil {
+			return err
+		}
+		by[c.SHA] = c
+	}
+	return rows.Err()
 }
 
 // topicMatch is the widest rung of retrieve's keyword ladder over the
