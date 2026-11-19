@@ -15,6 +15,14 @@ describe("serverMessage", () => {
     expect(await serverMessage(res)).toBe("not in the checkout");
   });
 
+  it("names the status when the body is a proxy's error page", async () => {
+    const res = new Response(
+      "<html><head><title>502 Bad Gateway</title></head></html>",
+      { status: 502, headers: { "Content-Type": "text/html" } },
+    );
+    expect(await serverMessage(res)).toBe("The server answered with 502.");
+  });
+
   it("names the status when the body says nothing", async () => {
     const res = new Response("", { status: 502 });
     expect(await serverMessage(res)).toBe("The server answered with 502.");

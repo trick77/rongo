@@ -2669,6 +2669,28 @@ describe("Ask, retrying a failed turn", () => {
     );
   });
 
+  it("says the status, not a proxy's error page, when the backend is not there", async () => {
+    // A restart behind the proxy: a 502 whose body is the proxy's HTML.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 502,
+        text: async () =>
+          "<html><head><title>502 Bad Gateway</title></head></html>",
+      })),
+    );
+
+    await ask("How?");
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "The server answered with 502.",
+      ),
+    );
+    expect(screen.getByRole("alert").textContent).not.toContain("<html>");
+  });
+
   it("offers no retry on a turn that answered", async () => {
     streamFrames([
       ev("thread", { thread_id: "1" }),
