@@ -333,6 +333,56 @@ func scanMaven(repo string, paths []string, read Read) (units []Unit, deps []Dep
 	return units, deps, skipped
 }
 
+// gradleDependencies is the text of a build file's dependencies blocks, each
+// up to its own closing brace. Not the buildscript's: its classpath is the
+// build's, not the module's. And not what follows a block: a forced version
+// in a resolution strategy names a coordinate the module may never use.
+// Braces are counted plainly; one inside a string is rare enough in a
+// dependencies block, and an unbalanced block runs to the end as before.
+func gradleDependencies(s string) string {
+	var skip [][2]int // buildscript blocks, and the blocks already taken
+	inside := func(at int) bool {
+		for _, r := range skip {
+			if at >= r[0] && at < r[1] {
+				return true
+			}
+		}
+		return false
+	}
+	for _, m := range gradleBuildOpen.FindAllStringIndex(s, -1) {
+		skip = append(skip, [2]int{m[0], braceEnd(s, m[1])})
+	}
+	var b strings.Builder
+	for _, m := range gradleDepsOpen.FindAllStringIndex(s, -1) {
+		if inside(m[0]) {
+			continue
+		}
+		end := braceEnd(s, m[1])
+		b.WriteString(s[m[1]:end])
+		b.WriteByte('\n')
+		skip = append(skip, [2]int{m[0], end})
+	}
+	return b.String()
+}
+
+// braceEnd is the index of the brace that closes the block opened just
+// before from, or len(s) when it never closes.
+func braceEnd(s string, from int) int {
+	depth := 1
+	for i := from; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return len(s)
+}
+
 func first(re *regexp.Regexp, s string) string {
 	if m := re.FindStringSubmatch(s); m != nil {
 		return strings.TrimSpace(m[1])
@@ -347,7 +397,8 @@ var (
 	gradleQuoted    = regexp.MustCompile(`["']([^"']+)["']`)
 	gradleProject   = regexp.MustCompile(`project\s*\(\s*["']([^"']+)["']\s*\)`)
 	gradleCoord     = regexp.MustCompile(`["']([A-Za-z0-9_.\-]+):([A-Za-z0-9_.\-]+)(?::[^"']*)?["']`)
-	gradleDepsBlock = regexp.MustCompile(`(?s)dependencies\s*\{(.*)`)
+	gradleDepsOpen  = regexp.MustCompile(`\bdependencies\s*\{`)
+	gradleBuildOpen = regexp.MustCompile(`\bbuildscript\s*\{`)
 	gradleGroup     = regexp.MustCompile(`(?m)^\s*group\s*=?\s*["']([^"']+)["']`)
 )
 
@@ -397,13 +448,13 @@ func scanGradle(repo string, paths []string, has map[string]bool, read Read) (un
 					kind = KindGradleService
 				}
 				group = first(gradleGroup, s)
-				if dm := gradleDepsBlock.FindStringSubmatch(s); dm != nil {
-					for _, m := range gradleProject.FindAllStringSubmatch(dm[1], -1) {
+				if deps := gradleDependencies(s); deps != "" {
+					for _, m := range gradleProject.FindAllStringSubmatch(deps, -1) {
 						if to, ok := byPath[m[1]]; ok && to != k {
 							requires = append(requires, Dep{Repo: repo, From: k, To: to})
 						}
 					}
-					for _, m := range gradleCoord.FindAllStringSubmatch(dm[1], -1) {
+					for _, m := range gradleCoord.FindAllStringSubmatch(deps, -1) {
 						requires = append(requires, Dep{Repo: repo, From: k, Coordinate: m[1] + ":" + m[2]})
 					}
 				}

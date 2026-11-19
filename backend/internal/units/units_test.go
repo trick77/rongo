@@ -140,6 +140,41 @@ dependencies {
 	}
 }
 
+func TestScan_aGradleDependencyIsReadOnlyFromTheModulesOwnBlock(t *testing.T) {
+	// The build script's classpath is the build's, not the module's, and what
+	// follows the dependencies block is not a dependency either: a forced
+	// version names a coordinate the module may not use at all.
+	paths, read := fixtureRead(map[string]string{
+		"settings.gradle": `include ':app'`,
+		"app/build.gradle": `buildscript {
+  dependencies { classpath "org.flywaydb:flyway-gradle-plugin:9.0.0" }
+}
+dependencies {
+  implementation "org.slf4j:slf4j-api:2.0.0"
+  testImplementation("org.junit.jupiter:junit-jupiter:5.10.0") {
+    exclude group: "org.hamcrest"
+  }
+}
+configurations.all {
+  resolutionStrategy.force "com.google.guava:guava:30.0-jre"
+}
+dependencies { runtimeOnly "org.postgresql:postgresql:42.7.0" }`,
+	})
+	_, deps, _ := Scan("shop", paths, read)
+	var got []string
+	for _, d := range deps {
+		got = append(got, d.Coordinate)
+	}
+	want := "org.junit.jupiter:junit-jupiter,org.postgresql:postgresql,org.slf4j:slf4j-api"
+	if strings.Join(got, ",") != want {
+		t.Errorf("deps = %v, want %s", got, want)
+	}
+	// A block that never closes runs to the end, as the whole-file read did.
+	if got := gradleDependencies(`dependencies { implementation "a.b:c:1"`); !strings.Contains(got, "a.b:c") {
+		t.Errorf("unclosed block = %q, want its coordinate", got)
+	}
+}
+
 func TestScan_aGoModuleInASubdirectoryIsAUnitAndTheRootIsNot(t *testing.T) {
 	paths, read := fixtureRead(map[string]string{
 		"go.mod":         "module github.com/example/root\n\ngo 1.22\n",
