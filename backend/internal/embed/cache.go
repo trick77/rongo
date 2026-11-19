@@ -6,14 +6,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/trick77/rongo/internal/sqlutil"
 )
-
-// getBatch is how many hashes go into one IN (…) lookup. A full repository
-// index asks for thousands at once, which is well past SQLite's variable limit
-// — a hard failure on the first real run that no small unit test reaches.
-const getBatch = 500
 
 // Cache is the content-hash embedding cache.
 //
@@ -38,9 +34,9 @@ func NewCache(db *sql.DB, model string, dim int) *Cache {
 // meaning.
 func (c *Cache) Get(ctx context.Context, hashes []string) (map[string][]float32, error) {
 	out := make(map[string][]float32, len(hashes))
-	for start := 0; start < len(hashes); start += getBatch {
-		end := min(start+getBatch, len(hashes))
-		batch := hashes[start:end]
+	// Chunked: a full repository index asks for thousands at once, past
+	// SQLite's variable limit, a failure no small unit test reaches.
+	for batch := range slices.Chunk(hashes, sqlutil.InChunk) {
 		args := append([]any{c.model}, sqlutil.Args(batch)...)
 		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 		q := `SELECT content_hash, embedding FROM embed_cache WHERE model = ? AND content_hash IN (` +

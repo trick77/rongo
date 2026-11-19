@@ -3,6 +3,7 @@ package sourceview
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/trick77/rongo/internal/gitrepo"
@@ -51,11 +52,9 @@ func (s *Service) WithCommits(r CommitReader) *Service {
 // one query rather than one per file.
 func (s *Service) indexedPaths(ctx context.Context, repo string, files []gitrepo.FileChange) (map[string]bool, error) {
 	out := map[string]bool{}
-	// A few hundred bound parameters per statement: a commit that touches a
-	// whole vendored tree must not run into SQLite's variable limit.
-	const batch = 500
-	for start := 0; start < len(files); start += batch {
-		part := files[start:min(start+batch, len(files))]
+	// Chunked: a commit that touches a whole vendored tree must not run into
+	// SQLite's variable limit.
+	for part := range slices.Chunk(files, sqlutil.InChunk) {
 		args := make([]any, 0, 1+len(part))
 		args = append(args, repo)
 		for _, f := range part {
