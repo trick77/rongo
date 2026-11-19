@@ -2650,6 +2650,25 @@ describe("Ask, retrying a failed turn", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
 
+  it("says what the server said when it refuses the question", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 400,
+        text: async () => '{"error":"the question is too long"}',
+      })),
+    );
+
+    await ask("How?");
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "the question is too long",
+      ),
+    );
+  });
+
   it("offers no retry on a turn that answered", async () => {
     streamFrames([
       ev("thread", { thread_id: "1" }),
