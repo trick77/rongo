@@ -882,8 +882,9 @@ func identifiers(s string) []string {
 }
 
 // estimateTokens is the chunker's own heuristic, so a budget here means the
-// same thing a chunk's size does there.
-var estimateTokens = indexer.EstimateTokens
+// same thing a chunk's size does there. A function, not a variable: nothing
+// in the package can swap how a budget counts.
+func estimateTokens(s string) int { return indexer.EstimateTokens(s) }
 
 // inStage reports whether the stage restriction allows this path. A
 // repository absent from the restriction is not narrowed; one present keeps
