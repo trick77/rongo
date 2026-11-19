@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode"
 
 	"go.yaml.in/yaml/v3"
 
@@ -438,6 +439,9 @@ func loadStages(repo string, raw []rawStage) ([]Stage, error) {
 		if stageStopWords[name] {
 			return nil, fmt.Errorf("%s: stage %q is an ordinary word, which would narrow every question containing it to that stage", repo, name)
 		}
+		if strings.ContainsFunc(name, unicode.IsSpace) {
+			return nil, fmt.Errorf("%s: stage %q must be one word: a question is matched word by word", repo, name)
+		}
 		prefix := strings.TrimSpace(r.Path)
 		prefix = strings.TrimSuffix(prefix, "**")
 		prefix = strings.TrimSuffix(prefix, "/") + "/"
@@ -459,6 +463,11 @@ func loadStages(repo string, raw []rawStage) ([]Stage, error) {
 			}
 			if stageStopWords[a] {
 				return nil, fmt.Errorf("%s: stage %q alias %q is an ordinary word, which would narrow every question containing it to that stage", repo, name, a)
+			}
+			// The store keeps aliases space-joined: "prod eu" would come back
+			// as two, the second checked against nothing above.
+			if strings.ContainsFunc(a, unicode.IsSpace) {
+				return nil, fmt.Errorf("%s: stage %q alias %q must be one word: a question is matched word by word", repo, name, a)
 			}
 			if seen[a] {
 				return nil, fmt.Errorf("%s: stage %q alias %q names a stage twice", repo, name, a)

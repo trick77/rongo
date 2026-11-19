@@ -64,6 +64,10 @@ func TestLoad_refusesBadStages(t *testing.T) {
 		{"alias is a project", "          - name: prod\n            path: prod/\n            aliases: [acme]\n", "project"},
 		{"alias is an ordinary word", "          - name: intg\n            path: intg/\n            aliases: [integration]\n", "ordinary word"},
 		{"name is an ordinary word", "          - name: test\n            path: test/\n", "ordinary word"},
+		// Stored space-joined and read back split, "prod eu" would come back
+		// as two aliases, the second never checked against anything.
+		{"alias of two words", "          - name: prod\n            path: prod/\n            aliases: [prod eu]\n", "one word"},
+		{"name of two words", "          - name: prod eu\n            path: prod/\n", "one word"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
