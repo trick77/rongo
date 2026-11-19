@@ -19,17 +19,8 @@ type feedbackRequest struct {
 // handleGetFeedback answers the reader's verdict on their thread, or null when
 // none was given. Not the reader's → 404, like every other read by address.
 func (s *Server) handleGetFeedback(w http.ResponseWriter, r *http.Request) {
-	u, id, ok := s.threadTarget(w, r)
+	u, id, ok := s.ownedThread(w, r)
 	if !ok {
-		return
-	}
-	owns, err := s.deps.Threads.Owns(r.Context(), u.Subject, id)
-	if err != nil {
-		serverError(w, r, "check thread owner failed", err)
-		return
-	}
-	if !owns {
-		httpx.WriteError(w, http.StatusNotFound, "no such thread")
 		return
 	}
 	fb, found, err := s.deps.Threads.Feedback(r.Context(), u.Subject, id)
