@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { toMermaid, mermaidize } from "./diagramExport";
+import { unsafeSource } from "@trick77/diagram/mermaid";
+import { toMermaid, mermaidize, toDrawing } from "./diagramExport";
 import type { FlowSpec, SequenceSpec } from "./diagram";
 
 const seq: SequenceSpec = {
@@ -174,5 +175,56 @@ describe("mermaidize", () => {
   it("leaves an unclosed diagram fence as the text it is", () => {
     const src = "```diagram\n{half";
     expect(mermaidize(src)).toBe(src);
+  });
+});
+
+describe("toDrawing", () => {
+  // A stored spec has no size cap, so a large one goes to the renderer,
+  // whose gate refuses a source naming a URL, a `//`, a backslash or a
+  // loading attribute anywhere: one such label would cost the whole
+  // picture. The drawing breaks those characters up; the reader sees the
+  // same text.
+  const risky: FlowSpec = {
+    type: "flow",
+    nodes: [
+      { id: "a", label: "GET https://api/x", kind: "start" },
+      { id: "b", label: "C:\\conf", kind: "step" },
+      { id: "c", label: "set href and src=x, url(y)", kind: "step" },
+      { id: "d", label: "//comment", kind: "end" },
+    ],
+    edges: [
+      { from: "a", to: "b", label: "javascript:void" },
+      { from: "b", to: "c" },
+      { from: "c", to: "d" },
+    ],
+  };
+
+  it("writes nothing the renderer's gate refuses", () => {
+    expect(unsafeSource(toMermaid(risky))).not.toBeNull();
+    expect(unsafeSource(toDrawing(risky))).toBeNull();
+    const seq: SequenceSpec = {
+      type: "sequence",
+      actors: [
+        { id: "c", label: "Client" },
+        { id: "s", label: "https://api" },
+      ],
+      steps: [{ from: "c", to: "s", label: "GET //x\\y", kind: "call" }],
+    };
+    expect(unsafeSource(toDrawing(seq))).toBeNull();
+  });
+
+  it("reads the same, invisible joints aside", () => {
+    const visible = toDrawing(risky).replace(/\u200b/g, "");
+    expect(visible).toContain("GET https://api/x");
+    expect(visible).toContain("C:\u29f5conf");
+    expect(visible).toContain("set href and src=x, url(y)");
+  });
+
+  it("leaves the clipboard's text as the model wrote it", () => {
+    const body = JSON.stringify(risky);
+    const out = mermaidize("```diagram\n" + body + "\n```");
+    expect(out).toContain("GET https://api/x");
+    expect(out).toContain("C:\\conf");
+    expect(out).not.toContain("\u200b");
   });
 });

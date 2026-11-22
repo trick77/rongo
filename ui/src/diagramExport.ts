@@ -90,18 +90,23 @@ function shape(kind: FlowKind, label: string): string {
  * cite, and a spec the backend never renumbered would draw the prompt's
  * numbers as if they were the reader's; copied, an answer carries no
  * markers at all. */
-export function toMermaid(spec: DiagramSpec): string {
+export function toMermaid(
+  spec: DiagramSpec,
+  text: (label: string) => string = (label) => label,
+): string {
   if (spec.type === "sequence") {
     const id = safeIds(spec.actors.map((a) => a.id));
     const out = ["sequenceDiagram"];
     // An empty label is a spec parseDiagram accepts, and `participant x as `
     // with nothing after it takes the whole diagram down with a parse error.
     for (const a of spec.actors)
-      out.push(`    participant ${id.get(a.id)} as ${bare(a.label) || a.id}`);
+      out.push(
+        `    participant ${id.get(a.id)} as ${bare(text(a.label)) || text(a.id)}`,
+      );
     for (const s of spec.steps) {
       const arrow = arrows[s.kind] ?? arrows.call;
       out.push(
-        `    ${id.get(s.from)}${arrow}${id.get(s.to)}: ${bare(s.label)}`,
+        `    ${id.get(s.from)}${arrow}${id.get(s.to)}: ${bare(text(s.label))}`,
       );
     }
     return out.join("\n");
@@ -109,12 +114,44 @@ export function toMermaid(spec: DiagramSpec): string {
   const id = safeIds(spec.nodes.map((n) => n.id));
   const out = ["flowchart TD"];
   for (const n of spec.nodes)
-    out.push(`    ${id.get(n.id)}${shape(n.kind, n.label)}`);
+    out.push(`    ${id.get(n.id)}${shape(n.kind, text(n.label))}`);
   for (const e of spec.edges) {
-    const link = e.label ? `-->|${quoted(e.label)}|` : "-->";
+    const link = e.label ? `-->|${quoted(text(e.label))}|` : "-->";
     out.push(`    ${id.get(e.from)} ${link} ${id.get(e.to)}`);
   }
   return out.join("\n");
+}
+
+/** toDrawing is toMermaid for the renderer rather than the clipboard. A
+ * stored spec has no size cap, so a large one is drawn by the mermaid
+ * renderer, whose gate (@trick77/diagram) refuses a source naming a URL, a
+ * `//`, a backslash or a loading attribute anywhere: one such label in an
+ * old answer would cost its whole picture. Those are broken up with a zero
+ * width space, which reads the same; a backslash becomes the reverse
+ * solidus operator, which looks it. The clipboard keeps what the model
+ * wrote (mermaidize). */
+export function toDrawing(spec: DiagramSpec): string {
+  return toMermaid(spec, defuse);
+}
+
+const zw = "​";
+
+/** defuse breaks up, in one label, what the renderer's gate refuses. */
+function defuse(label: string): string {
+  return label
+    .replace(/\\/g, "⧵")
+    .replace(/\/(?=\/)/g, `/${zw}`)
+    .replace(/(https?|javascript|data)(?=\s*:)/gi, `$1${zw}`)
+    .replace(/(h)(ref)/gi, `$1${zw}$2`)
+    .replace(/(s)(rc(?:\s*=|set))/gi, `$1${zw}$2`)
+    .replace(/(p)(oster)|(b)(ackground\s*=)/gi, `$1$3${zw}$2$4`)
+    .replace(/(\$)(?=link|sprite|tags)/gi, `$1${zw}`)
+    .replace(/(u)(rl\s*\()/gi, `$1${zw}$2`)
+    .replace(/(@)(\s*(?:import|\{))/gi, `$1${zw}$2`)
+    .replace(/(%)(%\s*\{)/g, `$1${zw}$2`)
+    .replace(/(image)(-set)|(cross)(-fade)/gi, `$1$3${zw}$2$4`)
+    .replace(/(#)(x?[0-9a-f]+;)/gi, `$1${zw}$2`)
+    .replace(/(<\/?)(?=[a-z])/gi, `$1${zw}`);
 }
 
 /** mermaidize rewrites the diagram fences in an answer for the clipboard:

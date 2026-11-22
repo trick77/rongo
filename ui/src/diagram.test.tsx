@@ -13,6 +13,7 @@ import {
 // refusal, by the source.
 const draw = vi.fn(async (src: string) => {
   if (src.includes("bad")) return { error: "Parse error on line 1" };
+  if (src.includes("themeCSS")) return { error: "unsafe: a url()" };
   if (src.startsWith("classDiagram"))
     return { svg: '<svg data-by="renderer"><g class="drawn"></g></svg>' };
   return {
@@ -28,6 +29,7 @@ vi.mock("@trick77/diagram/mermaid", async (original) => ({
   configure: (o: unknown) => configure(o),
 }));
 
+import { unsafeSource } from "@trick77/diagram/mermaid";
 import Diagram, {
   diagramSource,
   parseDiagram,
@@ -146,6 +148,13 @@ describe("diagramSource", () => {
     }
   });
 
+  it("hands the renderer a stored spec its gate lets through", () => {
+    // A URL or a backslash in one stored label must not cost the picture.
+    const body =
+      '{"type":"flow","nodes":[{"id":"a","label":"GET https://api/x"},{"id":"b","label":"C:\\\\conf"}],"edges":[{"from":"a","to":"b"}]}';
+    expect(unsafeSource(diagramSource("diagram", body)!)).toBeNull();
+  });
+
   it("takes a diagram fence holding mermaid text as mermaid", () => {
     expect(diagramSource("diagram", "sequenceDiagram\n A->>B: hi")).toBe(
       "sequenceDiagram\n A->>B: hi",
@@ -187,6 +196,17 @@ describe("Diagram", () => {
       "flowchart LR\n bad[",
     );
     expect(container.querySelector("svg")).toBeNull();
+  });
+
+  it("says why: a parse error and a refused source read apart", async () => {
+    // A source the renderer could make fetch is refused on purpose; read
+    // as a parse error it would look like a model's mistake.
+    const broken = render(<Diagram src={"flowchart LR\n bad["} />);
+    expect(await broken.findByText("Parse error on line 1")).toBeTruthy();
+    const refused = render(
+      <Diagram src={'%%{init: {"themeCSS": "x"}}%%\npie\n "a" : 1'} />,
+    );
+    expect(await refused.findByText("unsafe: a url()")).toBeTruthy();
   });
 
   it("offers the full view and the file, without being hovered first", async () => {
