@@ -1,0 +1,64 @@
+[
+  {
+    "question": "Who does which step when a customer places an order, and where can the order stop?",
+    "lang": "en",
+    "must": [
+      "The front-end takes the order and forwards it to the orders service.",
+      "The orders service collects the customer's address, card and cart items before charging.",
+      "A separate payment service authorises the amount, and a declined or missing authorisation stops the order.",
+      "The orders service asks the shipping service to ship, and shipping puts the shipment on a queue a separate consumer picks up.",
+      "The order is saved by the orders service after payment and shipping."
+    ],
+    "must_not": [
+      "The orders service itself decides whether the payment is authorised.",
+      "The order is saved before payment is authorised."
+    ]
+  },
+  {
+    "question": "Wer erledigt bei der Registrierung eines neuen Kunden welchen Schritt?",
+    "lang": "de",
+    "must": [
+      "Der Shop (Frontend) nimmt die Registrierung an und gibt sie an den User-Dienst weiter.",
+      "Der User-Dienst legt den Kunden an und speichert das Passwort nur als gesalzenen Hash.",
+      "Danach lässt der Shop den Warenkorb der Sitzung mit dem Warenkorb des Kunden im Warenkorb-Dienst zusammenführen.",
+      "Zum Schluss setzt der Shop das Sitzungs-Cookie."
+    ],
+    "must_not": [
+      "Der User-Dienst führt die Warenkörbe zusammen."
+    ]
+  },
+  {
+    "question": "How is the payment service's Service built, and what wraps it before the endpoints get it?",
+    "lang": "en",
+    "must": [
+      "Service is an interface with Authorise and Health.",
+      "The implementation holds a decline-over amount and authorises amounts up to it.",
+      "A logging middleware implements the same interface and wraps the implementation.",
+      "The endpoints are built on the wrapped service."
+    ],
+    "must_not": [
+      "The endpoints call the implementation directly, without the logging middleware."
+    ]
+  },
+  {
+    "question": "Wie ist der Service des User-Dienstes aufgebaut, und welche Hüllen legen sich um ihn?",
+    "lang": "de",
+    "must": [
+      "Service ist ein Interface mit Methoden für Login, Registrierung, Benutzer, Adressen, Karten, Löschen und Health.",
+      "Die Implementierung ist fixedService.",
+      "Um sie legen sich eine Logging-Hülle und eine Instrumentierungs-Hülle, die beide dasselbe Interface erfüllen.",
+      "Die Endpoints werden auf dem umhüllten Service gebaut."
+    ]
+  },
+  {
+    "question": "Which types make up a customer order in the orders service, and how are they connected?",
+    "lang": "en",
+    "must": [
+      "A CustomerOrder holds the customer, the delivery address, the card, the items and the shipment, with a date and a total.",
+      "A Customer refers to lists of addresses and cards."
+    ],
+    "must_not": [
+      "An order holds only references to the cart."
+    ]
+  }
+]

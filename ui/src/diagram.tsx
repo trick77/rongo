@@ -1,23 +1,24 @@
-import { useRef, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { fileName } from "@trick77/diagram";
+import {
+  configure,
+  diagramKind,
+  diagramTitle,
+  draw,
+  type Drawn,
+} from "@trick77/diagram/mermaid";
+import { DiagramCard } from "@trick77/diagram/react";
 import { useResolved } from "./useResolved";
-import { download, fileName, toMermaid, toSvgFile } from "./diagramExport";
-import { dropStrayMarks, escapeAngles } from "./diagramText";
-import { diagramKind } from "./diagramKind";
-
-export { diagramKind };
-import DiagramView from "./DiagramView";
+import { toMermaid } from "./diagramExport";
+import OverlayShell from "./OverlayShell";
 import { DownloadIcon, ExpandIcon } from "./icons";
 
 /**
- * One diagram in an answer: a fenced block tagged `mermaid`, drawn by the
- * mermaid renderer into an SVG string that is then set as innerHTML.
- *
- * That is model output reaching innerHTML, which markdown.tsx refuses on
- * principle, and the reason it is allowed here is the renderer's own guard:
- * `securityLevel: "strict"` runs every label through DOMPurify and forbids
- * HTML labels, links and click bindings, so a prompt injection ends as text
- * in a box. Nothing calls bindFunctions, so nothing the spec says is ever
- * executed.
+ * One diagram in an answer: a fenced block tagged `mermaid`, drawn by
+ * @trick77/diagram into an SVG string that is then set as innerHTML. The
+ * package draws flowcharts, sequences, state machines and entity models
+ * itself and hands every other kind to the mermaid renderer; why that is
+ * safe to set as innerHTML is said there (./mermaid draw).
  *
  * The picture no longer cites: a node carries no markers and draws no chip.
  * The sentence that introduces the diagram names its sources, as a doc-only
@@ -29,12 +30,11 @@ import { DownloadIcon, ExpandIcon } from "./icons";
  * The `diagram` JSON fence of older answers still draws. Every stored thread
  * holds one, and toMermaid (diagramExport.ts) already wrote it as mermaid for
  * the clipboard; the same conversion now feeds the renderer.
- *
- * The renderer measures text with getBBox, which jsdom lacks, so a test
- * mocks `mermaid` and asserts on what this file does around it: parse,
- * cache, fall back. mermaid.parse alone runs under jsdom, and corpus.test.ts
- * uses it to prove every corpus answer is drawable.
  */
+
+// Every drawing's element ids start with rongo's name: two drawings on one
+// page must not share one. Before the first fence, as the package asks.
+configure({ ids: "rongo-diagram" });
 
 // ---- legacy spec ----
 
@@ -172,259 +172,17 @@ export function diagramSource(tag: string, body: string): string | null {
  * prose about the format inside a code block is not mistaken for one. */
 const specRe = /^\s*\{\s*"type"\s*:\s*"(?:flow|sequence)"/;
 
-const titles: Record<string, string> = {
-  flowchart: "Flow diagram",
-  graph: "Flow diagram",
-  sequenceDiagram: "Sequence diagram",
-  stateDiagram: "State diagram",
-  "stateDiagram-v2": "State diagram",
-  erDiagram: "Entity diagram",
-  classDiagram: "Class diagram",
-};
-
-/** diagramTitle names the picture, in the accessible label, the file and the
- * full view's header. */
-export function diagramTitle(src: string): string {
-  return titles[diagramKind(src)] ?? "Diagram";
-}
-
-// ---- rendering ----
-
-/** The theme is read off the document, not tabulated here: index.css says
- * nothing reaches for var(--color-…) directly, and this is the one exception
- * because the renderer wants hex values in a config object, not classes on
- * elements. Missing under jsdom, where the tokens are not loaded; the renderer
- * then keeps its own defaults.
- *
- * Every frame is `--color-faint`, and that is a measurement, not a taste: the
- * border token is chrome, where it separates a panel from the page ground, and
- * against a node fill four points away from it a frame drew at 1.3:1 and did
- * not appear on screen at all. Faint reads at 4:1 and stays under the arrows'
- * muted, so the flow remains the loudest thing drawn. A cluster sits on the
- * page ground instead and reads 3.6:1 there; nothing sits between the two, so
- * it takes the same value rather than a quieter rung that would draw nothing.
- * A test asserts the five border keys, but only the screen proves a line: a
- * declared colour and the painted pixel have disagreed before. */
-export function themeVariables(): Record<string, string> {
-  if (typeof getComputedStyle !== "function") return {};
-  const style = getComputedStyle(document.documentElement);
-  const token = (name: string) => style.getPropertyValue(name).trim();
-  const vars: Record<string, string> = {};
-  const set = (key: string, name: string) => {
-    const v = token(name);
-    if (v !== "") vars[key] = v;
-  };
-  set("background", "--color-bg");
-  set("primaryColor", "--color-panel");
-  set("primaryBorderColor", "--color-faint");
-  set("primaryTextColor", "--color-ink");
-  set("textColor", "--color-ink");
-  set("lineColor", "--color-muted");
-  set("signalColor", "--color-muted");
-  set("signalTextColor", "--color-ink");
-  set("secondaryColor", "--color-active");
-  set("secondaryBorderColor", "--color-faint");
-  set("secondaryTextColor", "--color-ink");
-  set("tertiaryColor", "--color-ochre-wash");
-  set("tertiaryBorderColor", "--color-ochre");
-  set("tertiaryTextColor", "--color-ink");
-  set("noteBkgColor", "--color-ochre-wash");
-  set("noteBorderColor", "--color-ochre");
-  set("noteTextColor", "--color-ink");
-  set("actorBkg", "--color-active");
-  set("actorBorder", "--color-faint");
-  set("actorTextColor", "--color-ink");
-  set("actorLineColor", "--color-faint");
-  set("labelBoxBkgColor", "--color-panel");
-  set("labelBoxBorderColor", "--color-faint");
-  set("labelTextColor", "--color-ink");
-  set("loopTextColor", "--color-ink");
-  set("edgeLabelBackground", "--color-panel");
-  set("clusterBkg", "--color-bg");
-  set("clusterBorder", "--color-faint");
-  set("titleColor", "--color-ink");
-  set("attributeBackgroundColorOdd", "--color-panel");
-  set("attributeBackgroundColorEven", "--color-active");
-  set("fontFamily", "--font-sans");
-  // The renderer's own default is 16px, which is prose size; a label is
-  // chrome and reads at the size the rest of the chrome does.
-  vars.fontSize = "13.5px";
-  return vars;
-}
-
-/** The renderer is loaded on the first fence, not with the shell: it is the
- * largest dependency by far, and a page that draws no diagram — the share
- * page, the Repos page, most threads — should not carry it. One import
- * promise, so two fences arriving together load it once. */
-type Mermaid = typeof import("mermaid").default;
-let loading: Promise<Mermaid> | null = null;
-function renderer(): Promise<Mermaid> {
-  if (!loading) {
-    loading = import("mermaid").then(
-      (m) => {
-        init(m.default);
-        return m.default;
-      },
-      (e: unknown) => {
-        // A load that failed (a redeploy took the chunk away, a blip) is
-        // tried again by the next fence, not remembered for the session.
-        loading = null;
-        throw e;
-      },
-    );
-  }
-  return loading;
-}
-
-function init(mermaid: Mermaid): void {
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: "strict",
-    theme: "base",
-    // The renderer's default look ("neo") puts a drop shadow under every
-    // box; the chrome has none, so the drawing has none either.
-    look: "classic",
-    themeVariables: themeVariables(),
-    fontFamily: themeVariables().fontFamily,
-    flowchart: { htmlLabels: false, curve: "basis" },
-    sequence: { useMaxWidth: true },
-    er: { useMaxWidth: true },
-  });
-}
-
-/** A drawing, and whose: `own` is rongo's (editorial.ts), drawn at its
- * natural width on a canvas of its own; otherwise the renderer's, scaled into
- * the card. */
-export type Drawn = { svg: string; own?: true } | { error: string };
-
-/** The kinds rongo draws itself; every other kind is the renderer's. */
-export const ownKinds: ReadonlySet<string> = new Set([
-  "flowchart",
-  "graph",
-  "sequenceDiagram",
-  "stateDiagram",
-  "stateDiagram-v2",
-  "erDiagram",
-]);
-
-/** ours is rongo's drawing of a parsed source, or null where it has none.
- * Anything going wrong in it — the chunk gone after a redeploy, a layout
- * that throws — is a reason to let the renderer draw, never a failed
- * picture. */
-async function ours(mermaid: Mermaid, src: string): Promise<string | null> {
-  // Asked by kind before anything loads: a class diagram or a gantt chart
-  // never fetches the layout engine or parses its source a second time.
-  if (!ownKinds.has(diagramKind(src))) return null;
-  try {
-    const { editorial } = await import("./editorial");
-    return await editorial(mermaid, src, `rongo-diagram-${++seq}`);
-  } catch {
-    return null;
-  }
-}
-
-/** One drawing per source text, however many times the answer re-renders.
- * The stream re-renders on every token, and a closed fence is drawn once.
- * Never evicted: a session's diagrams are a few strings, and the same
- * string mounted twice (the card and the full view) is one drawing. */
-const drawn = new Map<string, Promise<Drawn>>();
-let seq = 0;
-
-/** draw renders a source to an SVG string, or to the parser's complaint.
- *
- * Only a drawing is kept. The renderer loads each diagram type as its own
- * chunk, so the first sequence or entity diagram of a session can fail for
- * a reason that is not the source (a redeploy took the hashed chunk away, a
- * network blip); kept, that failure would follow the source for the rest of
- * the session. A refused source is cheap to refuse again.
- *
- * The source is drawn with its angle brackets kept as text (escapeAngles,
- * diagramText.ts). Should that ever fail to parse where the source as
- * written does, the source as written is drawn: keeping a bracket must never
- * cost a picture that drew without it, and a refusal quotes what the model
- * wrote, not the escaped text.
- *
- * Exported for the tests, which mock the renderer and assert on the cache. */
-export function draw(src: string): Promise<Drawn> {
-  let p = drawn.get(src);
-  if (!p) {
-    p = (async (): Promise<Drawn> => {
-      try {
-        const mermaid = await renderer();
-        // A class mark on a line of its own marks nothing and makes the
-        // renderer refuse everything; it goes before anything else is read.
-        const written = dropStrayMarks(src);
-        const text = escapeAngles(written);
-        if (text !== written) {
-          try {
-            return await drawFrom(mermaid, text);
-          } catch (e) {
-            // Only a refusal of the escaped text falls back. Anything else (a
-            // chunk gone after a redeploy, a blip) is no reason to cache a
-            // picture without its brackets for the session; it fails this
-            // attempt like any other, and the next one tries again.
-            if (await mermaid.parse(text, { suppressErrors: true })) throw e;
-            // A form escapeAngles escapes into something the renderer
-            // refuses: drawn below as written, its brackets lost as before.
-            // Said, so the gap shows.
-            console.warn(
-              "diagram: escaped source refused, drawn as written",
-              e,
-            );
-          }
-        }
-        return await drawFrom(mermaid, written);
-      } catch (e) {
-        drawn.delete(src);
-        return { error: e instanceof Error ? e.message : String(e) };
-      }
-    })();
-    drawn.set(src, p);
-  }
-  return p;
-}
-
-/** drawFrom is one attempt at a drawing. rongo's own first: its parse is
- * the only one a flowchart pays for. A source it cannot parse is declined
- * like any other and meets the renderer's parse, which says why. */
-async function drawFrom(mermaid: Mermaid, text: string): Promise<Drawn> {
-  const own = await ours(mermaid, text);
-  if (own !== null) return { svg: own, own: true };
-  await mermaid.parse(text);
-  const { svg } = await mermaid.render(`rongo-diagram-${++seq}`, text);
-  return { svg };
-}
+// ---- the card ----
 
 /** useDrawn is the drawing for a source, null while it is on its way. */
 export function useDrawn(src: string): Drawn | null {
   return useResolved(src, draw);
 }
 
-/** MermaidSvg is the drawing itself, sized by the renderer: the SVG carries
- * a viewBox and a max-width of its own intrinsic width, so it fits a narrow
- * column by scaling down and never grows past 1:1. */
-export function MermaidSvg({
-  svg,
-  title,
-}: {
-  svg: string;
-  title: string;
-}): ReactNode {
-  return (
-    // font-sans explicitly: the diagram sits inside the answer's .ui-markdown
-    // wrapper, which is serif prose. A node label is a name from the code,
-    // not prose, and it reads as the rest of the chrome does.
-    <div
-      className="rongo-diagram font-sans"
-      role="img"
-      aria-label={title}
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
-  );
-}
+const icons = { expand: <ExpandIcon />, download: <DownloadIcon /> };
 
-/** Diagram is the picture as it sits in an answer: the card, and the two
- * ways out of it, the full view and the file.
+/** Diagram is the picture as it sits in an answer: the package's card, with
+ * its two ways out, the full view (in rongo's overlay) and the file.
  *
  * It owns its own fallbacks because the drawing is asynchronous. While the
  * renderer works the reader sees that a picture is on its way; a source the
@@ -433,9 +191,6 @@ export function MermaidSvg({
  * next one can be diagnosed at a glance. */
 export default function Diagram({ src }: { src: string }): ReactNode {
   const out = useDrawn(src);
-  const [full, setFull] = useState(false);
-  const card = useRef<HTMLDivElement>(null);
-  const title = diagramTitle(src);
 
   if (out === null) return <DiagramPending />;
   if ("error" in out) {
@@ -449,83 +204,18 @@ export default function Diagram({ src }: { src: string }): ReactNode {
     );
   }
 
-  function save() {
-    download(fileName(src), toSvgFile(out as { svg: string }, card.current));
-  }
-
-  // rongo's own drawing brings its canvas, so the card is only a frame for
-  // the two buttons, as wide as the drawing and never wider than the text it
-  // sits in: a picture running past the prose read as out of place. Wider
-  // than the text it is scaled down, never scrolled; the full view is there
-  // to read it at size.
-  if (out.own) {
-    return (
-      <div className="mt-3">
-        <div ref={card} className="w-max max-w-full">
-          {tools("above")}
-          <MermaidSvg svg={out.svg} title={title} />
-          {full && (
-            <DiagramView
-              src={src}
-              svg={out.svg}
-              onClose={() => setFull(false)}
-            />
-          )}
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div
-      ref={card}
-      className="relative mt-3 rounded-ui-sm border border-border bg-panel p-3"
-    >
-      {tools("over")}
-      <MermaidSvg svg={out.svg} title={title} />
-      {full && (
-        <DiagramView src={src} svg={out.svg} onClose={() => setFull(false)} />
-      )}
-    </div>
+    <DiagramCard
+      svg={out.svg}
+      // A real boolean: the card takes a missing `own` for the package's
+      // drawing, and the renderer's would lose its frame.
+      own={out.own === true}
+      title={diagramTitle(src)}
+      fileName={fileName(diagramKind(src), "rongo")}
+      shell={OverlayShell}
+      icons={icons}
+    />
   );
-
-  /** tools is the full view and the file. Always drawn, never revealed on
-   * hover: a phone has no hover, and the full view is the only way it can
-   * see a wide diagram whole. On the renderer's drawing they sit over the
-   * card on a fade of it. On rongo's they sit in a row above the canvas,
-   * flush with its right edge: inside it they covered a sequence's last
-   * participant at inline scale, and a band kept clear for them went into
-   * every file and full view, where there are no buttons. */
-  function tools(place: "over" | "above") {
-    return (
-      <div
-        className={
-          place === "over"
-            ? "absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 bg-gradient-to-l from-panel from-70% to-transparent pl-6"
-            : "mb-1 flex items-center justify-end gap-0.5"
-        }
-      >
-        <button
-          type="button"
-          onClick={() => setFull(true)}
-          title="Full view"
-          aria-label={`${title}: full view`}
-          className="grid h-7 w-7 place-items-center rounded-ui-sm text-faint hover:bg-active hover:text-ink-dim"
-        >
-          <ExpandIcon />
-        </button>
-        <button
-          type="button"
-          onClick={save}
-          title="Download SVG"
-          aria-label={`${title}: download SVG`}
-          className="grid h-7 w-7 place-items-center rounded-ui-sm text-faint hover:bg-active hover:text-ink-dim"
-        >
-          <DownloadIcon />
-        </button>
-      </div>
-    );
-  }
 }
 
 /** The box a diagram's place holds while the picture is still being drawn,

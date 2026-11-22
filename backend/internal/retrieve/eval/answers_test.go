@@ -322,8 +322,9 @@ type answerRecord struct {
 	// column is the only place the deployment's German spelling shows.
 	Digraphs []string `json:"digraphs,omitempty"`
 	// Diagram is the type the answer's diagram fence names, "flowchart",
-	// "sequenceDiagram", "stateDiagram-v2", "erDiagram" (ask.DiagramKind),
-	// and "" when the reader gets prose alone.
+	// "sequenceDiagram", "stateDiagram-v2", "erDiagram", "classDiagram", or
+	// "swimlane" for a flowchart drawn in lanes (ask.DiagramShape), and ""
+	// when the reader gets prose alone.
 	Diagram string `json:"diagram,omitempty"`
 	Err     string `json:"err,omitempty"`
 }
@@ -734,7 +735,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 				rec.Digraphs = a.Respelled
 				digraphs += len(rec.Digraphs)
 			}
-			rec.Diagram = ask.DiagramKind(a.Text)
+			rec.Diagram = ask.DiagramShape(a.Text)
 			if rec.Diagram != "" {
 				diagrams++
 			}
@@ -799,6 +800,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 		// (asked - answered). A card whose continuation failed is failed alone.
 		t.Logf("  run %d: rubric %d/%d present, %d contradicted, %d forbidden asserted; cited parts %d/%d; gathered parts %d/%d; asked %d (answered %d); failed %d; %d tokens; digraphs %d; diagrams %d",
 			run, present, must, contra, asserted, citeHit, citeTotal, gatherHit, citeTotal, asked, answered, failed, tokens, digraphs, diagrams)
+		t.Logf("  run %d: shapes %s", run, shapeTally(records, run))
 	}
 	body, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {

@@ -1,0 +1,63 @@
+An order is placed by the front-end service on the customer's behalf, handed to the orders service to be priced, authorised by the payment service, matched to a shipment and only then saved — and it can stop at the log-in check, at a missing address or card, at a declined payment, or at a service timeout.
+
+### Who does what
+
+```mermaid
+flowchart LR
+  subgraph FE["Front-end service"]
+    b{"Logged in?"}
+    c["Fetch customer, address, card"]
+    r1["Order refused"]
+  end
+  subgraph OS["Orders service"]
+    e{"All details present?"}:::focus
+    f["Price the items"]
+    g{"Payment authorised?"}:::focus
+    h["Save order"]
+    r2["Order rejected"]
+    r3["Payment declined"]
+  end
+  subgraph PS["Payment service"]
+    i["Compare total to limit"]
+  end
+  subgraph SH["Shipping service"]
+    j["Queue shipment"]
+  end
+  subgraph QM["Queue-master"]
+    k["Receive shipment task"]
+  end
+  b -- "no" --> r1
+  b -- "yes" --> c --> e
+  e -- "no" --> r2
+  e -- "yes" --> f --> i --> g
+  g -- "no" --> r3
+  g -- "yes" --> j --> h --> k
+  classDef focus fill:#ffe9a8,stroke:#b8860b;
+```
+
+The customer's browser session reaches the front-end order service, which refuses the request outright if the log-in cookie is absent [1]. It then reads the customer record and, in parallel, the customer's saved address and saved card, and posts an order that points at those records and at the customer's cart [1].
+
+The orders service takes over and rejects the order if any of the four links — customer, address, card, items — is missing [2]. It fetches all four in parallel, adds up the item prices into an order total, and sends a payment request carrying the address, card, customer and total to the payment service [2].
+
+The payment service authorises the order when the total is at or below its decline limit and declines it above that limit, while a zero or negative total is refused as an invalid amount [3]. Back in the orders service, a decline or a response it cannot parse stops the order with a payment-declined error [2].
+
+Once payment is authorised, the orders service asks the shipping service for a shipment against that customer, assembles the order with its shipment, total and timestamp, saves it and returns it [2]. The shipping service places the shipment on a queue whether or not the queue is reachable — it catches the failure and accepts the shipment anyway [4]. The queue-master picks the task up, but the step that would launch the shipping container is commented out, so the task is received and then nothing further happens [5]. How the final outcome is reported back to the customer's browser is not among the sources.
+
+### Where the order can stop
+
+- The log-in cookie is missing — the front-end refuses before any lookup happens [1]
+- The customer service is unreachable or returns a server error — the front-end aborts [1]
+- No address or card is on file — the front-end still sends the order with a null link, and the orders service rejects it for the missing detail [1][2]
+- The total sits above the payment limit, or the payment reply cannot be parsed — payment declined, nothing is saved [2][3]
+- The total is zero or negative — the payment service refuses the amount [3]
+- Any upstream service is slower than the configured wait, or an execution or I/O failure occurs — nothing is saved and a generic error is raised [2]
+
+Two things that look like stops are not: a dead shipping queue does not halt the order, because the shipping service swallows the failure and accepts the shipment [4]; and although the order is saved and returned, the queue-master performs no shipping work at all [5].
+
+### Where the rule is set
+
+- The four required order details and the log-in check are fixed in the code, so changing them is a development change [1][2]
+- The payment decline limit is read from a field on the payment service; where that value comes from is not among the sources [3]
+- The wait time after which a service is declared too slow is a field on the orders service; its value is not among the sources [2]
+- The decision to accept a shipment even when the queue is down is deliberate in the code, and carries a warning comment against shipping it as-is [4]
+- The container-spawn step is switched off in the code, not configured off [5]

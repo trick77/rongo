@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* The diagram card and full view are styled with utilities on these tokens,
+   in the package's sources. */
+@source "../node_modules/@trick77/diagram/src";
 
 /* Self-hosted variable fonts, the same files ../loom and ../peeq ship. */
 @font-face {
@@ -160,7 +163,7 @@
    chrome's warm greys a step darker than the composer. The memo's cool slate
    read as the one cold surface on a warm page. The focus is the chrome's
    accent-strong. Tokens outside @theme, so they make no utilities; the
-   drawing (diagramTheme.ts) reads them and writes them into the SVG
+   drawing (@trick77/diagram theme) reads them and writes them into the SVG
    resolved, so a downloaded file carries the same colours. */
 :root {
   --diagram-surface: #151514;
@@ -320,17 +323,6 @@ body {
 
 .ui-markdown :where(p, ul, ol, pre, h1, h2, h3, h4):last-child {
   margin-bottom: 0;
-}
-
-/* The renderer's SVG carries a viewBox and its own intrinsic max-width, so
-   it scales down into a narrow column and never past 1:1. Block, so the card
-   holds no inline-box gap under it. The colours are the theme's, handed to
-   the renderer as its theme variables (diagram.tsx themeVariables). */
-.rongo-diagram svg {
-  display: block;
-  margin-inline: auto;
-  max-width: 100%;
-  height: auto;
 }
 
 .ui-markdown :where(h1, h2, h3, h4) {

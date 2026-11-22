@@ -393,6 +393,36 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 		!strings.Contains(ba[:end], "a flowchart of it") || !strings.Contains(ba[:end], "a sequence diagram") {
 		t.Error("the BA audience block does not say when a picture belongs in the answer")
 	}
+	// The two shapes the package draws past the first five, each named where
+	// its reader is: lanes in the Analyst block (who does which step), the
+	// class diagram in the Developer block (how types are built). In the
+	// block, not only in the diagram rule: a rule there alone never fired
+	// (2026-09-17-ba-diagrams.md).
+	if end := strings.Index(ba, "Open with ONE sentence"); end < 0 || !strings.Contains(ba[:end], "a lane per role") {
+		t.Error("the BA audience block does not ask for lanes where the work passes between roles")
+	}
+	dev := *promptDev
+	if end := strings.Index(dev, "Open with ONE sentence"); end < 0 || !strings.Contains(dev[:end], "a class diagram") {
+		t.Error("the DEV audience block does not ask for a class diagram of the types")
+	}
+	for name, p := range map[string]string{"BA": *promptBA, "DEV": *promptDev} {
+		// The lanes as the package reads them: left to right, one subgraph
+		// per role, every step inside one; two roles with every arrow from
+		// the first into the second would be read as a mapping instead.
+		if !strings.Contains(p, "flowchart LR with one subgraph per role") || !strings.Contains(p, "Every step sits in a role") {
+			t.Errorf("the %s diagram rule does not ask for lanes the package draws", name)
+		}
+		// Past the package's caps the renderer draws: 5 lanes, 8 classes,
+		// 12 relations, 10 members.
+		if !strings.Contains(p, "at most 5 roles") || !strings.Contains(p, "At most 8 classes, 12 relations, 10 members") {
+			t.Errorf("the %s diagram rule does not state the package's caps for lanes and classes", name)
+		}
+		// Stored records stay an entity diagram: a class diagram is for
+		// types with behaviour.
+		if !strings.Contains(p, "classDiagram") || !strings.Contains(p, "stay an erDiagram") {
+			t.Errorf("the %s diagram rule does not tell a class diagram from an entity diagram", name)
+		}
+	}
 	// The diagram rule's trigger is audience-neutral: a branch or a second
 	// party earns the picture, whoever the parties are.
 	for name, p := range map[string]string{"BA": *promptBA, "DEV": *promptDev} {

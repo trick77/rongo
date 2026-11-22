@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { splitPath } from "./paths";
 import { drawPlantUml } from "./plantuml";
 import { useResolved } from "./useResolved";
-import { download, toPng, toXml, withGround } from "./diagramExport";
+import { download, toPng, toXml, withGround } from "@trick77/diagram";
 import { DownloadIcon } from "./icons";
 
 /**

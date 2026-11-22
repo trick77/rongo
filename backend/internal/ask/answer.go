@@ -285,7 +285,9 @@ one part has none. The opening sentence stands above the first heading. Where
 the mechanism is a
 process the reader follows step by step - a case that moves through states,
 an approval, a hand-off with a decision on the way - the answer also carries
-a flowchart of it; where it is an exchange between systems, roles or people,
+a flowchart of it; where the question is who does which step, as the work
+passes between roles - a customer, a department, a system - a flowchart with
+a lane per role; where it is an exchange between systems, roles or people,
 a sequence diagram. The diagram sits after the paragraph that introduces the
 steps. No source code, no signatures, no file paths in running text. Answer
 the question, draw the flow if there is one, and then stop.
@@ -585,7 +587,10 @@ const answerDev = `
 Audience: developer. Name types, functions and files, and quote short excerpts
 where they carry the explanation. A fenced code block carries its language tag
 (` + "```go" + `, ` + "```typescript" + `), never a bare ` + "```" + `. Describe
-the control flow so that it can be followed in the code.`
+the control flow so that it can be followed in the code. Where the question is
+how types are built and relate - an interface and what implements or wraps
+it, a type and the types it holds - the answer carries a class diagram of
+them.`
 
 // answerShape follows the audience block for BOTH audiences, which is why it
 // is its own constant rather than a paragraph in each of them.
@@ -680,6 +685,15 @@ var answerIntent = map[string]string{
 // and the type that draws it; the mapping row says outright that a target is
 // one node, because that is the error the flowchart made.
 //
+// The lane and class rows came with @trick77/diagram, which draws both, and
+// each says what the package reads as that picture: lanes are a flowchart LR
+// whose every step sits in one role's subgraph, with arrows inside a role
+// too, since two roles with every arrow from one into the other are the
+// mapping; a class diagram is types with behaviour, while stored records stay
+// the entity diagram. The caps are the package's (fits.ts); past them the
+// generic renderer draws. Measured on a fixed context: class 4 of 4, lanes
+// 2 of 4, no rubric cost (2026-11-22-lanes-and-classes.md).
+//
 // The picture does not cite. It used to, through a src array per node, and
 // the chips were the reason the renderer was hand-written; the sentence that
 // introduces the diagram carries the markers now, as a doc-only claim
@@ -703,18 +717,32 @@ At most one diagram. Draw one when the explanation is steps in an order with
 a decision that splits the path; two or more parties exchanging messages in
 an order, whether the parties are functions and services or
 roles, systems and people; a set of states with the transitions between
-them; entities with the relations between them; or a mapping from triggers
-to targets.
+them; entities with the relations between them; types in the code with what
+they implement, extend, wrap or hold; or a mapping from triggers to targets.
 Steps with no branch and one party are a list, not a diagram. Skip it when
 the answer is one rule, one value or one place.
 The diagram is a fenced block tagged ` + "```mermaid" + ` holding mermaid
 syntax, and its type follows the shape of the content:
 - steps with a branch: flowchart TD, a decision as a {"?"} node, the
   condition as the edge label
+- steps that pass between two or more roles, each step done by one of them
+  (who does what): flowchart LR with one subgraph per role, titled with the
+  role - subgraph ord["Order service"] - and each step inside the subgraph of
+  the role that does it; arrows in the order the steps happen, within a role
+  as well as between roles, a decision as a {"?"} node.
+  Every step sits in a role; at most 5 roles. A role written twice is one
+  subgraph.
 - an exchange between parties over time: sequenceDiagram, one participant
   per party
 - states and transitions: stateDiagram-v2, the guard on the transition
 - entities and their relations: erDiagram, with the fields that matter
+- types in the code (an interface and what implements or wraps it, a type
+  and the types it holds): classDiagram, one class per type with the fields
+  and methods that matter, written bare as in the code - +Authorise(amount
+  float32) Authorisation - a generic as List~Item~, <<interface>> inside an
+  interface's class; <|-- extends, <|.. implements, *-- holds, --> uses, a
+  label after a colon. At most 8 classes, 12 relations, 10 members a class.
+  Stored records and the keys between them stay an erDiagram
 - a mapping from triggers to targets (which event produces to which topic,
   which handler serves which route): flowchart LR with two subgraphs, the
   triggers in one and the targets in the other, an edge per pair and the
