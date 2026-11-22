@@ -29,6 +29,19 @@ function manyClasses(extra: string): string {
   return [...lines, extra].join("\n");
 }
 
+/** overCap is a flowchart past the own drawing's cap (16 nodes), so the
+ * renderer draws it, ending in one node labelled as given; extra lines
+ * (a style, say) follow. */
+function overCap(label: string, ...extra: string[]): string {
+  const steps = Array.from(
+    { length: 18 },
+    (_, i) => `  n${i}["Step ${i}"] --> n${i + 1}["Step ${i + 1}"]`,
+  );
+  return ["flowchart TD", ...steps, `  n18 --> z["${label}"]`, ...extra].join(
+    "\n",
+  );
+}
+
 describe("the renderer's gate", () => {
   it("draws a class diagram naming URLs and generics in its members", async () => {
     const src = manyClasses(
@@ -64,17 +77,39 @@ describe("the renderer's gate", () => {
     // A style that loads, on a flow past the own drawing's cap. A directive
     // is no longer the test: its config is inert under the renderer's
     // locked keys, and the package drops it before the gate reads the rest.
-    const steps = Array.from(
-      { length: 18 },
-      (_, i) => `  n${i}["Step ${i}"] --> n${i + 1}["Step ${i + 1}"]`,
-    );
-    const src = [
-      "flowchart TD",
-      ...steps,
+    const src = overCap(
+      "Done",
       "  style n0 fill:url(https://example.invalid/a.png)",
-    ].join("\n");
+    );
     expect(await refusal(src)).toMatch(/^unsafe: /);
   });
+
+  // A tag with an attribute is refused in any case, a stray `<` inside it
+  // or not (let through by 0.1.9); a bare acting tag in lower case is
+  // refused wherever it stands, also straight after a word (`List<script>`,
+  // let through by 0.1.8). A bare tag in capitals is text, as is a generic,
+  // a stereotype or a comparison with the same brackets: drawn.
+  for (const label of [
+    "List<script>alert(1)</script>",
+    "x<object .a=1 data=/api/logout>",
+    "x<img x< onerror=alert(1)>",
+    "x<OBJECT x< data=/api/logout>",
+  ])
+    it(`refuses the label ${label}, and says why`, async () => {
+      expect(await refusal(overCap(label))).toMatch(/^unsafe: /);
+    });
+
+  for (const label of [
+    "Map<String, Object>",
+    "List<Template>",
+    "a < b and c = d",
+    "<<Template>>",
+    "Page<Frame>",
+    "Step <Script>alert(1)</Script>",
+  ])
+    it(`draws the label ${label}`, async () => {
+      expect(await refusal(overCap(label))).toBeNull();
+    });
 
   it("drops a directive's inert config and draws the rest", async () => {
     const src =
