@@ -38,6 +38,13 @@ type Spec struct {
 	// Branch is optional. Empty means "resolve the remote's default branch",
 	// which is NOT necessarily master — this corpus mixes master and main.
 	Branch string
+	// BranchPattern names the branch by release month instead
+	// (branch_pattern, branch_switch_day): the poller resolves it at every
+	// poll, and a month change is an ordinary branch change. nil for an
+	// entry with a fixed or a default branch. Branch is empty beside it, so
+	// nothing past the poller may read an empty Branch as "the default":
+	// repo_state.branch is what is actually indexed.
+	BranchPattern *BranchPattern
 	// TokenEnv names the environment variable holding the access token for this
 	// repository's forge. The value never appears in the YAML. It only applies
 	// to an https remote: an ssh remote authenticates with a key, and naming a
@@ -161,20 +168,24 @@ type rawProject struct {
 // rawSpec exists so Enabled can default to true. A plain bool would default to
 // false and silently disable every entry that omits the field.
 type rawSpec struct {
-	Name        string     `yaml:"name"`
-	CloneURL    string     `yaml:"clone_url"`
-	Branch      string     `yaml:"branch"`
-	TokenEnv    string     `yaml:"token_env"`
-	TokenUser   string     `yaml:"token_user"`
-	TokenAuth   string     `yaml:"token_auth"`
-	Enabled     *bool      `yaml:"enabled"`
-	Snapshot    bool       `yaml:"snapshot"`
-	Part        string     `yaml:"part"`
-	Description string     `yaml:"description"`
-	Uses        []string   `yaml:"uses"`
-	Image       string     `yaml:"image"`
-	Stages      []rawStage `yaml:"stages"`
-	Index       rawIndex   `yaml:"index"`
+	Name          string `yaml:"name"`
+	CloneURL      string `yaml:"clone_url"`
+	Branch        string `yaml:"branch"`
+	BranchPattern string `yaml:"branch_pattern"`
+	// BranchSwitchDay is a pointer so an explicit 0 is refused rather than
+	// read as absent.
+	BranchSwitchDay *int       `yaml:"branch_switch_day"`
+	TokenEnv        string     `yaml:"token_env"`
+	TokenUser       string     `yaml:"token_user"`
+	TokenAuth       string     `yaml:"token_auth"`
+	Enabled         *bool      `yaml:"enabled"`
+	Snapshot        bool       `yaml:"snapshot"`
+	Part            string     `yaml:"part"`
+	Description     string     `yaml:"description"`
+	Uses            []string   `yaml:"uses"`
+	Image           string     `yaml:"image"`
+	Stages          []rawStage `yaml:"stages"`
+	Index           rawIndex   `yaml:"index"`
 }
 
 type rawIndex struct {
@@ -351,6 +362,10 @@ func loadEntry(r rawSpec, project string, enabled bool) (Spec, error) {
 	} else if err := validateToken(r); err != nil {
 		return Spec{}, err
 	}
+	pattern, err := loadBranchPattern(r)
+	if err != nil {
+		return Spec{}, err
+	}
 	if r.Enabled != nil && !*r.Enabled {
 		enabled = false
 	}
@@ -368,21 +383,22 @@ func loadEntry(r rawSpec, project string, enabled bool) (Spec, error) {
 		return Spec{}, err
 	}
 	return Spec{
-		Name:        r.Name,
-		CloneURL:    strings.TrimSpace(r.CloneURL),
-		Snapshot:    r.Snapshot,
-		Branch:      strings.TrimSpace(r.Branch),
-		TokenEnv:    strings.TrimSpace(r.TokenEnv),
-		TokenUser:   strings.TrimSpace(r.TokenUser),
-		TokenAuth:   strings.TrimSpace(r.TokenAuth),
-		Enabled:     enabled,
-		Project:     project,
-		Part:        strings.TrimSpace(r.Part),
-		Description: strings.TrimSpace(r.Description),
-		Uses:        trimAll(r.Uses),
-		Image:       image,
-		Stages:      stages,
-		Index:       Index{Exclude: r.Index.Exclude, Latest: r.Index.Latest},
+		Name:          r.Name,
+		CloneURL:      strings.TrimSpace(r.CloneURL),
+		Snapshot:      r.Snapshot,
+		Branch:        strings.TrimSpace(r.Branch),
+		BranchPattern: pattern,
+		TokenEnv:      strings.TrimSpace(r.TokenEnv),
+		TokenUser:     strings.TrimSpace(r.TokenUser),
+		TokenAuth:     strings.TrimSpace(r.TokenAuth),
+		Enabled:       enabled,
+		Project:       project,
+		Part:          strings.TrimSpace(r.Part),
+		Description:   strings.TrimSpace(r.Description),
+		Uses:          trimAll(r.Uses),
+		Image:         image,
+		Stages:        stages,
+		Index:         Index{Exclude: r.Index.Exclude, Latest: r.Index.Latest},
 	}, nil
 }
 
@@ -648,6 +664,7 @@ func validateSnapshot(r rawSpec) error {
 	for _, f := range []struct{ name, value string }{
 		{"clone_url", r.CloneURL},
 		{"branch", r.Branch},
+		{"branch_pattern", r.BranchPattern},
 		{"token_env", r.TokenEnv},
 		{"token_user", r.TokenUser},
 		{"token_auth", r.TokenAuth},
@@ -657,6 +674,11 @@ func validateSnapshot(r rawSpec) error {
 				"%s: snapshot: true cannot be combined with %s — a snapshot is a directory extracted into the repository root by hand, with no remote to clone, authenticate to or resolve a branch from",
 				r.Name, f.name)
 		}
+	}
+	if r.BranchSwitchDay != nil {
+		return fmt.Errorf(
+			"%s: snapshot: true cannot be combined with branch_switch_day — a snapshot has no remote to resolve a branch from",
+			r.Name)
 	}
 	return nil
 }

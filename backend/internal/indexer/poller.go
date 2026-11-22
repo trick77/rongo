@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/trick77/rongo/internal/gitrepo"
@@ -57,7 +58,14 @@ type PollerDeps struct {
 	// FirstDelay overrides FirstPollDelay. A test that wants the first cycle
 	// immediately sets it; nothing in production does.
 	FirstDelay time.Duration
-	Logger     *slog.Logger
+	// Patterns are the entries that name their branch by release month,
+	// by repository name (PatternsOf). repo_state holds what one resolved
+	// to, never the pattern, so it comes from the file like Rules does.
+	Patterns map[string]*repos.BranchPattern
+	// Now is the clock a pattern's month is read from; nil is time.Now.
+	// Local time, not UTC: a switch day is the operator's calendar day.
+	Now    func() time.Time
+	Logger *slog.Logger
 }
 
 // Poller keeps every active repository current. It is deliberately sequential:
@@ -72,7 +80,13 @@ type Poller struct {
 	firstDelay time.Duration
 	history    *history.Store
 	depth      int
-	log        *slog.Logger
+	patterns   map[string]*repos.BranchPattern
+	now        func() time.Time
+	// olderWarned holds, per entry, the target month its older-month warning
+	// was last logged for.
+	olderMu     sync.Mutex
+	olderWarned map[string]string
+	log         *slog.Logger
 	// wake ends the wait before a cycle: a re-index request should not sit
 	// until the interval elapses. Buffered by one, so a nudge that lands
 	// mid-cycle starts the next one straight after.
@@ -96,10 +110,14 @@ func NewPoller(d PollerDeps) *Poller {
 	if d.HistoryDepth <= 0 {
 		d.HistoryDepth = DefaultHistoryDepth
 	}
+	if d.Now == nil {
+		d.Now = time.Now
+	}
 	return &Poller{
 		state: d.State, git: d.Git, index: d.Index,
 		tokens: d.Tokens, interval: d.Interval, firstDelay: d.FirstDelay,
 		history: d.History, depth: d.HistoryDepth,
+		patterns: d.Patterns, now: d.Now,
 		log: d.Logger, wake: make(chan struct{}, 1),
 	}
 }
@@ -359,8 +377,11 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 
 	// An omitted branch is resolved from the remote and written back, so the
 	// Repos page shows what is actually being indexed. Never assume master.
+	// A pattern entry has no branch in the file either, and the default is
+	// the one answer it must never get: it resolves after the fetch below.
 	branch := st.Branch
-	if branch == "" {
+	pattern := p.patterns[st.Name]
+	if branch == "" && pattern == nil {
 		resolved, err := p.git.DefaultBranch(ctx, spec, token)
 		if err != nil {
 			return pollResult{}, err
@@ -378,6 +399,33 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 		return pollResult{}, err
 	}
 
+	// After the fetch, on a fresh clone and a later poll alike: the month's
+	// branch may have appeared since the last one. The resolved name then
+	// takes the ordinary path, so a month change is a branch change, and an
+	// incremental one.
+	// The branch is written to the row only once the index for it stands (or
+	// the head turned out to be the one already indexed): hits and citations
+	// join repo_state.branch live, and a new name over the old month's chunks
+	// would cite lines under a branch they never came from.
+	recordBranch := func() error { return nil }
+	if pattern != nil {
+		resolved, err := p.resolvePattern(ctx, spec, st, pattern)
+		if err != nil {
+			return pollResult{}, err
+		}
+		if previous := st.Branch; resolved != previous {
+			recordBranch = func() error {
+				if err := p.state.SetBranch(ctx, st.Name, resolved); err != nil {
+					return err
+				}
+				p.log.Info("branch pattern resolved", "repo", st.Name,
+					"pattern", pattern.String(), "branch", resolved, "previous", previous)
+				return nil
+			}
+		}
+		branch, spec.Branch, st.Branch = resolved, resolved, resolved
+	}
+
 	head, err := p.git.HeadSHA(ctx, spec, branch)
 	if err != nil {
 		// ErrBranchGone included, deliberately: the caller records it, and
@@ -392,6 +440,9 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 		// earlier network failure has to go. Returning early without clearing
 		// it left a healthy repository showing a permanent error until someone
 		// happened to push to it.
+		if err := recordBranch(); err != nil {
+			return pollResult{}, err
+		}
 		return pollResult{SHA: head}, p.state.MarkChecked(ctx, st.Name)
 	}
 
@@ -413,8 +464,49 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 	return p.indexAndMark(ctx, st, head, paths, func() error {
 		// After the index and before last_sha moves: a failure here leaves
 		// the commit un-recorded, and the next cycle records it again.
-		return p.recordHistory(ctx, spec, head)
+		if err := p.recordHistory(ctx, spec, head); err != nil {
+			return err
+		}
+		return recordBranch()
 	})
+}
+
+// resolvePattern is the branch a pattern entry indexes this poll. It records
+// nothing: the caller writes the name to the row once the index for it
+// stands, and puts a failure on the Repos page.
+func (p *Poller) resolvePattern(ctx context.Context, spec repos.Spec, st RepoState, pattern *repos.BranchPattern) (string, error) {
+	branches, err := p.git.RemoteBranches(ctx, spec)
+	if err != nil {
+		return "", err
+	}
+	now := p.now()
+	resolved, older, err := resolveBranch(pattern, branches, now)
+	if err != nil {
+		return "", err
+	}
+	// Not an error: a month without a release is ordinary. But a scheme
+	// renamed upstream looks exactly like this, month after month. Said once
+	// per calendar month and entry, not on every poll.
+	if target := monthString(targetMonth(pattern, now)); older && p.warnOlderOnce(st.Name, target) {
+		p.log.Warn("branch pattern matched an older month", "repo", st.Name,
+			"pattern", pattern.String(), "branch", resolved, "target_month", target)
+	}
+	return resolved, nil
+}
+
+// warnOlderOnce reports whether the older-month warning for name is still
+// owed for the target month, and marks it given.
+func (p *Poller) warnOlderOnce(name, month string) bool {
+	p.olderMu.Lock()
+	defer p.olderMu.Unlock()
+	if p.olderWarned[name] == month {
+		return false
+	}
+	if p.olderWarned == nil {
+		p.olderWarned = map[string]string{}
+	}
+	p.olderWarned[name] = month
+	return true
 }
 
 // indexAndMark runs the index over paths (nil for a full run), then between

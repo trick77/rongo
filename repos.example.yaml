@@ -27,6 +27,22 @@
 # with `git ls-remote --symref origin HEAD`. That is not necessarily master:
 # this corpus mixes master and main.
 #
+# branch_pattern names the branch by release month instead, for a repository
+# that cuts one release branch per month. At every poll rongo picks, of the
+# branches the pattern matches WHOLE, the newest month not after the target
+# month, and within it the highest {n}. The target is the current month from
+# branch_switch_day (1..28, default 1) on, the previous month before it. A month
+# change is an ordinary branch change, indexed incrementally. Nothing matching
+# is an error on the Repos page; it never falls back to the default branch.
+# Placeholders: {yyyy} or {yy}, {mm}, optional {n}; the rest is literal. Not
+# with branch or snapshot. The day is read in the process's time zone, UTC in
+# the container unless TZ is set.
+#
+#   - name: letters
+#     clone_url: https://git.example.com/acme/letters.git
+#     branch_pattern: "rel/{yyyy}-{mm}.{n}"   # rel/2026-11.1, rel/2026-11.2
+#     branch_switch_day: 25                    # November's from Nov 25 on
+#
 # snapshot: true is for source that arrives as an ARCHIVE rather than a remote —
 # a vendor drop, a released tarball, anything with no git repository behind it.
 # There is nothing to clone, so clone_url, branch and token_env are all refused
