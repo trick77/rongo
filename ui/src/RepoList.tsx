@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import { shortSha } from "./paths";
 import { DiagramSvg } from "@trick77/diagram/react";
 import { useDrawn, type FlowNode, type FlowSpec } from "./diagram";
-import { toMermaid } from "./diagramExport";
+import { toDrawing } from "./diagramExport";
 import { ModalShell, cancelButton, saveButton } from "./ThreadModals";
 import { Icon } from "./Icon";
 
@@ -102,7 +102,7 @@ export function usedBy(library: string, repos: Repo[]): string[] {
 }
 
 /** wiringSpec turns a project's declared `uses` edges into the flow spec
- * an answer's diagram used to be written in, which toMermaid then writes as
+ * an answer's diagram used to be written in, which toDrawing then writes as
  * the source the renderer draws. The spec is kept as the middle step because
  * it already says what a node is, and a test can assert on it without
  * parsing diagram syntax.
@@ -693,7 +693,7 @@ export default function RepoList({ admin = false }: { admin?: boolean }) {
  * repository anyway, and a "could not be drawn" notice belongs to an answer,
  * where the model wrote the picture, not to a page drawing its own config. */
 function Wiring({ spec }: { spec: FlowSpec }) {
-  const out = useDrawn(toMermaid(spec));
+  const out = useDrawn(toDrawing(spec));
   if (out === null || "error" in out) return null;
   return <DiagramSvg svg={out.svg} title="Project wiring" />;
 }

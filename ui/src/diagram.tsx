@@ -9,16 +9,18 @@ import {
 } from "@trick77/diagram/mermaid";
 import { DiagramCard } from "@trick77/diagram/react";
 import { useResolved } from "./useResolved";
-import { toMermaid } from "./diagramExport";
+import { toDrawing } from "./diagramExport";
 import OverlayShell from "./OverlayShell";
 import { DownloadIcon, ExpandIcon } from "./icons";
 
 /**
  * One diagram in an answer: a fenced block tagged `mermaid`, drawn by
  * @trick77/diagram into an SVG string that is then set as innerHTML. The
- * package draws flowcharts, sequences, state machines and entity models
- * itself and hands every other kind to the mermaid renderer; why that is
- * safe to set as innerHTML is said there (./mermaid draw).
+ * package draws the kinds it knows itself and hands every other kind, and
+ * one past its caps, to the mermaid renderer; why that is safe to set as
+ * innerHTML is said there (./mermaid draw). The renderer path is gated: a
+ * source that could make the browser fetch on render (a URL, an image, a
+ * style that loads) is refused, and the card shows it as code, on purpose.
  *
  * The picture no longer cites: a node carries no markers and draws no chip.
  * The sentence that introduces the diagram names its sources, as a doc-only
@@ -29,7 +31,8 @@ import { DownloadIcon, ExpandIcon } from "./icons";
  *
  * The `diagram` JSON fence of older answers still draws. Every stored thread
  * holds one, and toMermaid (diagramExport.ts) already wrote it as mermaid for
- * the clipboard; the same conversion now feeds the renderer.
+ * the clipboard; the same conversion, with what the gate refuses broken up
+ * in its labels (toDrawing), now feeds the renderer.
  */
 
 // Every drawing's element ids start with rongo's name: two drawings on one
@@ -162,7 +165,7 @@ export function parseDiagram(body: string): DiagramSpec | null {
 export function diagramSource(tag: string, body: string): string | null {
   if (specRe.test(body)) {
     const spec = parseDiagram(body);
-    return spec ? toMermaid(spec) : body;
+    return spec ? toDrawing(spec) : body;
   }
   if (tag === "mermaid" || tag === "diagram") return body;
   return null;
@@ -185,10 +188,11 @@ const icons = { expand: <ExpandIcon />, download: <DownloadIcon /> };
  * its two ways out, the full view (in rongo's overlay) and the file.
  *
  * It owns its own fallbacks because the drawing is asynchronous. While the
- * renderer works the reader sees that a picture is on its way; a source the
- * renderer refuses is a defect, and for three releases it looked like an
- * ordinary code block. It says so now, and keeps the source underneath so the
- * next one can be diagnosed at a glance. */
+ * renderer works the reader sees that a picture is on its way. A source that
+ * is not drawn is either one the renderer cannot parse, a defect that for
+ * three releases looked like an ordinary code block, or one the gate refuses
+ * on purpose ("unsafe: …"). The card says which, in the package's words, and
+ * keeps the source underneath so either can be read at a glance. */
 export default function Diagram({ src }: { src: string }): ReactNode {
   const out = useDrawn(src);
 
@@ -197,6 +201,7 @@ export default function Diagram({ src }: { src: string }): ReactNode {
     return (
       <details className="mt-3 rounded-ui-sm border border-border bg-panel p-3 font-sans text-sm text-muted">
         <summary className="cursor-pointer">Diagram could not be drawn</summary>
+        <p className="mt-2 text-faint">{out.error}</p>
         <pre className="mt-2 overflow-x-auto font-mono text-[13px] leading-relaxed">
           <code>{src}</code>
         </pre>
