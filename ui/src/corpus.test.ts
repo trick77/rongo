@@ -1,16 +1,19 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import mermaid from "mermaid";
-import ELK from "elkjs/lib/elk.bundled.js";
-import { diagramKind, diagramSource, ownKinds } from "./diagram";
-import { dropStrayMarks, escapeAngles } from "./diagramText";
+import type { DiagramIR } from "@trick77/diagram";
+import {
+  diagramKind,
+  dropStrayMarks,
+  editorial,
+  escapeAngles,
+  fits,
+  ownKinds,
+  toIR,
+} from "@trick77/diagram/mermaid";
+import { checkIR } from "@trick77/diagram/check";
+import { diagramSource } from "./diagram";
 import { fenceRe } from "./markdown";
-import { fits, toIR, type DiagramIR } from "./diagramIR";
 import { mermaidize } from "./diagramExport";
-import { isMapping, layoutFlow } from "./diagramLayout";
-import { layoutSequence } from "./diagramSequence";
-import { check, checkER, checkSequence } from "./diagramCheck";
-import { layoutER } from "./diagramER";
-import { editorial } from "./editorial";
 
 /**
  * The other half of the diagram corpus. The .txt files are answers as models
@@ -111,16 +114,75 @@ function labels(ir: DiagramIR): string[] {
       ]),
       ...ir.rels.map((r) => r.label),
     ];
-  return [
-    ...ir.nodes.map((n) => n.label),
-    ...ir.edges.map((e) => e.label),
-    ...ir.zones.map((z) => z.title),
-  ];
+  if (ir.kind === "class")
+    return [
+      ...ir.classes.flatMap((c) => [
+        c.label,
+        c.stereotype ?? "",
+        ...[...c.fields, ...c.methods].map((m) => m.text),
+      ]),
+      ...ir.rels.flatMap((r) => [r.label, r.fromCard, r.toCard]),
+    ];
+  if (ir.kind === "flow" || ir.kind === "swimlane")
+    return [
+      ...ir.nodes.map((n) => n.label),
+      ...ir.edges.map((e) => e.label),
+      ...(ir.kind === "swimlane" ? ir.lanes : ir.zones).map((z) => z.title),
+    ];
+  // A kind no answer here is asked for (mindmap, timeline, quadrant): the
+  // package's own corpus counts its brackets.
+  return [];
 }
+
+/** generics counts the angle brackets a class diagram's `~T~` becomes,
+ * which escapeAngles never saw: a tilde in a class's declaration or body is
+ * drawn as one. One in a relationship's class name, `Repo~T~ <|-- Store`,
+ * only names the class. As the package's corpus counts them. */
+function generics(src: string): number {
+  if (!diagramKind(src).startsWith("classDiagram")) return 0;
+  let inClass = false;
+  let n = 0;
+  for (const line of src.split("\n")) {
+    const t = line.trim();
+    if (inClass) {
+      if (t.startsWith("}")) inClass = false;
+      else n += (t.match(/~/g) ?? []).length;
+    } else if (/^class\s/.test(t)) {
+      n += (t.match(/~/g) ?? []).length;
+      inClass = t.endsWith("{");
+    }
+  }
+  return n;
+}
+
+/** shapes is the drawing a source must come out as where the fence alone
+ * does not say: a swimlane and a mapping are both a flowchart LR with
+ * subgraphs, and a swimlane the package declines is drawn as a plain flow
+ * without failing anything else here. The backend's tally reads the same
+ * files (renumber.go DiagramShape) and must agree. */
+const shapes: Record<string, string> = {
+  "eval-swimlane-checkout-en.golden": "swimlane",
+  "mapping-lr.golden": "flow",
+  "eval-class-payment-en.golden": "class",
+};
 
 describe("rongo's drawing of the corpus", () => {
   beforeAll(() => {
     mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
+  });
+
+  it("reads the shapes the prompt asks for as those shapes", async () => {
+    for (const [file, want] of Object.entries(shapes)) {
+      const text = Object.entries(goldens).find(([p]) =>
+        p.endsWith(`/${file}`),
+      )?.[1];
+      expect(text, `${file} is missing from the corpus`).toBeDefined();
+      const src = escapeAngles(fence(text!)!.body);
+      const d = await mermaid.mermaidAPI.getDiagramFromText(src);
+      const ir = toIR(d.type, d.db);
+      expect(ir?.kind, file).toBe(want);
+      expect(fits(ir!), `${file} is past the caps`).toBe(true);
+    }
   });
 
   for (const [path, text] of Object.entries(goldens)) {
@@ -155,7 +217,7 @@ describe("rongo's drawing of the corpus", () => {
       const ir = toIR(d.type, d.db);
       if (ir === null) return;
       const drawn = labels(ir).join("");
-      expect((drawn.match(/[<>]/g) ?? []).length).toBe(kept);
+      expect((drawn.match(/[<>]/g) ?? []).length).toBe(kept + generics(src));
       expect(drawn).not.toMatch(/#lt;|#gt;|ﬂ°|¶ß/);
     });
 
@@ -164,17 +226,8 @@ describe("rongo's drawing of the corpus", () => {
       const d = await mermaid.mermaidAPI.getDiagramFromText(escapeAngles(src));
       const ir = toIR(d.type, d.db);
       if (ir === null || !fits(ir)) return;
-      if (ir.kind === "sequence") {
-        expect(checkSequence(layoutSequence(ir))).toEqual([]);
-        return;
-      }
-      if (ir.kind === "er") {
-        expect(checkER(await layoutER(ir, new ELK()))).toEqual([]);
-        return;
-      }
-      expect(
-        check(await layoutFlow(ir, new ELK()), { written: isMapping(ir) }),
-      ).toEqual([]);
+      // Laid out as the drawing lays it out, whatever the kind.
+      expect(await checkIR(ir)).toEqual([]);
     });
 
     it(`frames every node ${name} marks :::focus, and no other`, async () => {
@@ -183,7 +236,7 @@ describe("rongo's drawing of the corpus", () => {
         return;
       const d = await mermaid.mermaidAPI.getDiagramFromText(escapeAngles(src));
       const ir = toIR(d.type, d.db);
-      if (ir === null || ir.kind !== "flow") return;
+      if (ir === null || (ir.kind !== "flow" && ir.kind !== "swimlane")) return;
       // A node marked where it is declared, `c["…"]:::focus`, by its id.
       const marked = new Set(
         [

@@ -8,9 +8,9 @@ const renderToString = vi.fn();
 vi.mock("@plantuml/core", () => ({ renderToString }));
 vi.mock("@plantuml/core/themes.js", () => ({}));
 // jsdom has no canvas to encode with: the PNG itself is tested in
-// diagramExport.test.ts.
+// @trick77/diagram.
 const { toPng } = vi.hoisted(() => ({ toPng: vi.fn() }));
-vi.mock("./diagramExport", async (original) => ({
+vi.mock("@trick77/diagram", async (original) => ({
   ...(await original<object>()),
   toPng,
 }));

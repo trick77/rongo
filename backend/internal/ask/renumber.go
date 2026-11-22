@@ -209,37 +209,199 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 // that for every answer in the corpus. The answers harness reports it per
 // answer.
 func DiagramKind(text string) string {
+	kind, _ := diagramBody(text)
+	return kind
+}
+
+// diagramBody is the first diagram fence's kind and body, "" for none.
+func diagramBody(text string) (kind, body string) {
 	for rest := text; ; {
 		i := strings.Index(rest, "```")
 		if i < 0 {
-			return ""
+			return "", ""
 		}
 		nl := strings.IndexByte(rest[i:], '\n')
 		if nl < 0 {
-			return ""
+			return "", ""
 		}
 		head, after := rest[i:i+nl], rest[i+nl+1:]
 		end := strings.Index(after, "\n```")
 		if end < 0 {
-			return ""
+			return "", ""
 		}
 		if tag := infoTag(head); tag == "mermaid" || tag == "diagram" {
 			if kind := mermaidKind(after[:end]); kind != "" {
-				return kind
+				return kind, after[:end]
 			}
 		}
 		rest = after[end+4:]
 	}
 }
 
+// DiagramShape is DiagramKind, except that a flowchart the browser draws as
+// a swimlane is "swimlane": the harness tallies the two apart, and a
+// swimlane and a trigger-to-target mapping share their first word. The rule
+// is the package's (@trick77/diagram, mermaid/ir.ts lanes): left to right,
+// two or more roles (subgraphs of one title are one role), every step inside
+// one, no nesting, no arrow from a step to itself, and not two zones with
+// every arrow from the first into the second, which is the mapping. Read
+// line by line, not parsed: the UI corpus test holds the same files to the
+// renderer's own reading, and TestDiagramShape_agreesWithTheBrowserOnTheCorpus
+// holds this one to it.
+func DiagramShape(text string) string {
+	kind, body := diagramBody(text)
+	if (kind == "flowchart" || kind == "graph") && swimlane(body) {
+		return "swimlane"
+	}
+	return kind
+}
+
+var (
+	// quotedRe and the three below strip what a statement says about a node
+	// or an arrow, leaving ids and arrows.
+	quotedRe   = regexp.MustCompile(`"[^"]*"`)
+	edgeTextRe = regexp.MustCompile(`\|[^|]*\|`)
+	// linkTextRe is a label written inside the link, `-- text -->`,
+	// `== text ==>`, `-. text .->` (empty once quotes are gone): the whole
+	// link becomes a plain arrow, so the label is never read as a step.
+	linkTextRe = regexp.MustCompile(`(?:--|==|-\.)\s+(?:[^\s.=>-][^>]*?\s+)?(?:-{2,}[->ox]?|={2,}[=>]?|\.-[->]?)`)
+	shapeRe    = regexp.MustCompile(`[\[({][^\])}]*[\])}]+|:::[\w-]+`)
+	// arrowRe is any link: -->, ---, -.->, ==>, <-->, --o, --x.
+	arrowRe = regexp.MustCompile(`\s*<?(?:-{2,}|={2,}|-\.+-?)[-=.]*[>ox]?\s*`)
+	idRe    = regexp.MustCompile(`^[A-Za-z0-9_][\w-]*`)
+	// subgraphRe reads `subgraph id["Title"]` and `subgraph id[Title]`; any
+	// other subgraph line is titled by the rest of the line, unquoted
+	// (`subgraph Order service`, `subgraph "Sales team"`), as mermaid reads it.
+	subgraphRe = regexp.MustCompile(`^subgraph\s+([^\s\[]+)\s*\[\s*"?([^"\]]*)"?\s*\]`)
+)
+
+// role is the lane a subgraph line names.
+func role(line string) string {
+	if m := subgraphRe.FindStringSubmatch(line); m != nil {
+		if r := strings.TrimSpace(m[2]); r != "" {
+			return r
+		}
+		return m[1]
+	}
+	return strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "subgraph")), `"`)
+}
+
+func swimlane(body string) bool {
+	lines := strings.Split(body, "\n")
+	lines = lines[frontMatter(lines):]
+	head := true
+	var zones []string // role per raw subgraph, in order
+	zoneOf := map[string]int{}
+	nodes := map[string]bool{}
+	type edge struct{ from, to string }
+	var edges []edge
+	depth, current := 0, -1
+	inDescr := false
+	for _, line := range lines {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "%%") {
+			continue
+		}
+		if head {
+			head = false
+			f := strings.Fields(t)
+			if len(f) < 2 || strings.TrimRight(f[1], ";") != "LR" {
+				return false
+			}
+			continue
+		}
+		// accDescr { … } spans lines; its text is no step.
+		if inDescr {
+			inDescr = !strings.Contains(t, "}")
+			continue
+		}
+		if strings.HasPrefix(t, "accTitle") || strings.HasPrefix(t, "accDescr") {
+			inDescr = strings.Contains(t, "{") && !strings.Contains(t, "}")
+			continue
+		}
+		if t == "subgraph" || strings.HasPrefix(t, "subgraph ") {
+			depth++
+			if depth > 1 {
+				return false
+			}
+			zones = append(zones, role(t))
+			current = len(zones) - 1
+			continue
+		}
+		if t == "end" || t == "end;" {
+			depth--
+			current = -1
+			continue
+		}
+		if f := strings.Fields(t)[0]; f == "direction" || f == "classDef" || f == "class" ||
+			f == "style" || f == "linkStyle" || f == "click" {
+			continue
+		}
+		stmt := quotedRe.ReplaceAllString(t, "")
+		stmt = linkTextRe.ReplaceAllString(edgeTextRe.ReplaceAllString(stmt, ""), "-->")
+		stmt = shapeRe.ReplaceAllString(stmt, "")
+		// `~~~` is a layout hint: the steps on either side are steps, with no
+		// arrow between them (the package skips it as an edge).
+		for _, part := range strings.Split(stmt, "~~~") {
+			var prev []string
+			for _, seg := range arrowRe.Split(part, -1) {
+				var ids []string
+				for _, p := range strings.Split(seg, "&") {
+					if id := idRe.FindString(strings.TrimSpace(p)); id != "" {
+						ids = append(ids, id)
+					}
+				}
+				for _, id := range ids {
+					nodes[id] = true
+					if _, seen := zoneOf[id]; !seen && current >= 0 {
+						zoneOf[id] = current
+					}
+					for _, p := range prev {
+						edges = append(edges, edge{p, id})
+					}
+				}
+				if len(ids) > 0 {
+					prev = ids
+				}
+			}
+		}
+	}
+	if len(zones) < 2 || len(edges) == 0 {
+		return false
+	}
+	for id := range nodes {
+		if _, ok := zoneOf[id]; !ok {
+			return false
+		}
+	}
+	mapping := len(zones) == 2
+	for _, e := range edges {
+		if e.from == e.to {
+			return false
+		}
+		if zoneOf[e.from] != 0 || zoneOf[e.to] != 1 {
+			mapping = false
+		}
+	}
+	if mapping {
+		return false
+	}
+	roles := map[string]bool{}
+	for _, r := range zones {
+		roles[r] = true
+	}
+	return len(roles) >= 2
+}
+
 // mermaidKind is the first word of a mermaid source, past blank lines and
-// %% comments or directives, the way the browser reads it (diagram.tsx,
-// diagramKind). Empty when there is none, and empty when the word is not
-// the shape of a type name: a fence holding the older JSON spec opens with
-// a brace, and counting that as a diagram would put a picture in the
-// harness's tally that the reader never got.
+// %% comments or directives and leading YAML front matter, the way the
+// browser reads it (@trick77/diagram, diagramKind). Empty when there is none,
+// and empty when the word is not the shape of a type name: a fence holding
+// the older JSON spec opens with a brace, and counting that as a diagram
+// would put a picture in the harness's tally that the reader never got.
 func mermaidKind(body string) string {
-	for _, line := range strings.Split(body, "\n") {
+	lines := strings.Split(body, "\n")
+	for _, line := range lines[frontMatter(lines):] {
 		t := strings.TrimSpace(line)
 		if t == "" || strings.HasPrefix(t, "%%") {
 			continue
@@ -251,6 +413,24 @@ func mermaidKind(body string) string {
 		return word
 	}
 	return ""
+}
+
+// frontMatter is how many lines mermaid's leading YAML block (`---`, YAML,
+// `---`) takes, past blank lines; 0 for none or an unclosed one.
+func frontMatter(lines []string) int {
+	i := 0
+	for i < len(lines) && strings.TrimSpace(lines[i]) == "" {
+		i++
+	}
+	if i >= len(lines) || strings.TrimSpace(lines[i]) != "---" {
+		return 0
+	}
+	for k := i + 1; k < len(lines); k++ {
+		if strings.TrimSpace(lines[k]) == "---" {
+			return k + 1
+		}
+	}
+	return 0
 }
 
 // kindWordRe is the shape of a diagram type name: flowchart, graph,

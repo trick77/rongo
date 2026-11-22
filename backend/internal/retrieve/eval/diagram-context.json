@@ -1,0 +1,181 @@
+[
+  {
+    "question": "Who does which step when a customer places an order, and where can the order stop?",
+    "sources": [
+      {
+        "repo": "front-end",
+        "path": "api/orders/index.js",
+        "start_line": 48,
+        "end_line": 135,
+        "text": "  app.post(\"/orders\", function(req, res, next) {\n    console.log(\"Request received with body: \" + JSON.stringify(req.body));\n    var logged_in = req.cookies.logged_in;\n    if (!logged_in) {\n      throw new Error(\"User not logged in.\");\n      return\n    }\n\n    var custId = req.session.customerId;\n\n    async.waterfall([\n        function (callback) {\n          request(endpoints.customersUrl + \"/\" + custId, function (error, response, body) {\n            if (error || body.status_code === 500) {\n              callback(error);\n              return;\n            }\n            console.log(\"Received response: \" + JSON.stringify(body));\n            var jsonBody = JSON.parse(body);\n            var customerlink = jsonBody._links.customer.href;\n            var addressLink = jsonBody._links.addresses.href;\n            var cardLink = jsonBody._links.cards.href;\n            var order = {\n              \"customer\": customerlink,\n              \"address\": null,\n              \"card\": null,\n              \"items\": endpoints.cartsUrl + \"/\" + custId + \"/items\"\n            };\n            callback(null, order, addressLink, cardLink);\n          });\n        },\n        function (order, addressLink, cardLink, callback) {\n          async.parallel([\n              function (callback) {\n                console.log(\"GET Request to: \" + addressLink);\n                request.get(addressLink, function (error, response, body) {\n                  if (error) {\n                    callback(error);\n                    return;\n                  }\n                  console.log(\"Received response: \" + JSON.stringify(body));\n                  var jsonBody = JSON.parse(body);\n                  if (jsonBody.status_code !== 500 && jsonBody._embedded.address[0] != null) {\n                    order.address = jsonBody._embedded.address[0]._links.self.href;\n                  }\n                  callback();\n                });\n              },\n              function (callback) {\n                console.log(\"GET Request to: \" + cardLink);\n                request.get(cardLink, function (error, response, body) {\n                  if (error) {\n                    callback(error);\n                    return;\n                  }\n                  console.log(\"Received response: \" + JSON.stringify(body));\n                  var jsonBody = JSON.parse(body);\n                  if (jsonBody.status_code !== 500 && jsonBody._embedded.card[0] != null) {\n                    order.card = jsonBody._embedded.card[0]._links.self.href;\n                  }\n                  callback();\n                });\n              }\n          ], function (err, result) {\n            if (err) {\n              callback(err);\n              return;\n            }\n            console.log(result);\n            callback(null, order);\n          });\n        },\n        function (order, callback) {\n          var options = {\n            uri: endpoints.ordersUrl + '/orders',\n            method: 'POST',\n            json: true,\n            body: order\n          };\n          console.log(\"Posting Order: \" + JSON.stringify(order));\n          request(options, function (error, response, body) {\n            if (error) {\n              return callback(error);\n            }\n            console.log(\"Order response: \" + JSON.stringify(response));\n            console.log(\"Order response: \" + JSON.stringify(body));\n            callback(null, response.statusCode, body);\n          });"
+      },
+      {
+        "repo": "orders",
+        "path": "src/main/java/works/weave/socks/orders/controllers/OrdersController.java",
+        "start_line": 50,
+        "end_line": 125,
+        "text": "    @RequestMapping(path = \"/orders\", consumes = MediaType.APPLICATION_JSON_VALUE, method = RequestMethod.POST)\n    public\n    @ResponseBody\n    CustomerOrder newOrder(@RequestBody NewOrderResource item) {\n        try {\n\n            if (item.address == null || item.customer == null || item.card == null || item.items == null) {\n                throw new InvalidOrderException(\"Invalid order request. Order requires customer, address, card and items.\");\n            }\n\n\n            LOG.debug(\"Starting calls\");\n            Future<Resource<Address>> addressFuture = asyncGetService.getResource(item.address, new TypeReferences\n                    .ResourceType<Address>() {\n            });\n            Future<Resource<Customer>> customerFuture = asyncGetService.getResource(item.customer, new TypeReferences\n                    .ResourceType<Customer>() {\n            });\n            Future<Resource<Card>> cardFuture = asyncGetService.getResource(item.card, new TypeReferences\n                    .ResourceType<Card>() {\n            });\n            Future<List<Item>> itemsFuture = asyncGetService.getDataList(item.items, new\n                    ParameterizedTypeReference<List<Item>>() {\n            });\n            LOG.debug(\"End of calls.\");\n\n            float amount = calculateTotal(itemsFuture.get(timeout, TimeUnit.SECONDS));\n\n            // Call payment service to make sure they've paid\n            PaymentRequest paymentRequest = new PaymentRequest(\n                    addressFuture.get(timeout, TimeUnit.SECONDS).getContent(),\n                    cardFuture.get(timeout, TimeUnit.SECONDS).getContent(),\n                    customerFuture.get(timeout, TimeUnit.SECONDS).getContent(),\n                    amount);\n            LOG.info(\"Sending payment request: \" + paymentRequest);\n            Future<PaymentResponse> paymentFuture = asyncGetService.postResource(\n                    config.getPaymentUri(),\n                    paymentRequest,\n                    new ParameterizedTypeReference<PaymentResponse>() {\n                    });\n            PaymentResponse paymentResponse = paymentFuture.get(timeout, TimeUnit.SECONDS);\n            LOG.info(\"Received payment response: \" + paymentResponse);\n            if (paymentResponse == null) {\n                throw new PaymentDeclinedException(\"Unable to parse authorisation packet\");\n            }\n            if (!paymentResponse.isAuthorised()) {\n                throw new PaymentDeclinedException(paymentResponse.getMessage());\n            }\n\n            // Ship\n            String customerId = parseId(customerFuture.get(timeout, TimeUnit.SECONDS).getId().getHref());\n            Future<Shipment> shipmentFuture = asyncGetService.postResource(config.getShippingUri(), new Shipment\n                    (customerId), new ParameterizedTypeReference<Shipment>() {\n            });\n\n            CustomerOrder order = new CustomerOrder(\n                    null,\n                    customerId,\n                    customerFuture.get(timeout, TimeUnit.SECONDS).getContent(),\n                    addressFuture.get(timeout, TimeUnit.SECONDS).getContent(),\n                    cardFuture.get(timeout, TimeUnit.SECONDS).getContent(),\n                    itemsFuture.get(timeout, TimeUnit.SECONDS),\n                    shipmentFuture.get(timeout, TimeUnit.SECONDS),\n                    Calendar.getInstance().getTime(),\n                    amount);\n            LOG.debug(\"Received data: \" + order.toString());\n\n            CustomerOrder savedOrder = customerOrderRepository.save(order);\n            LOG.debug(\"Saved order: \" + savedOrder);\n\n            return savedOrder;\n        } catch (TimeoutException e) {\n            throw new IllegalStateException(\"Unable to create order due to timeout from one of the services.\", e);\n        } catch (InterruptedException | IOException | ExecutionException e) {\n            throw new IllegalStateException(\"Unable to create order due to unspecified IO error.\", e);\n        }"
+      },
+      {
+        "repo": "payment",
+        "path": "service.go",
+        "start_line": 41,
+        "end_line": 60,
+        "text": "func (s *service) Authorise(amount float32) (Authorisation, error) {\n\tif amount == 0 {\n\t\treturn Authorisation{}, ErrInvalidPaymentAmount\n\t}\n\tif amount < 0 {\n\t\treturn Authorisation{}, ErrInvalidPaymentAmount\n\t}\n\tauthorised := false\n\tmessage := \"Payment declined\"\n\tif amount <= s.declineOverAmount {\n\t\tauthorised = true\n\t\tmessage = \"Payment authorised\"\n\t} else {\n\t\tmessage = fmt.Sprintf(\"Payment declined: amount exceeds %.2f\", s.declineOverAmount)\n\t}\n\treturn Authorisation{\n\t\tAuthorised: authorised,\n\t\tMessage:    message,\n\t}, nil\n}"
+      },
+      {
+        "repo": "shipping",
+        "path": "src/main/java/works/weave/socks/shipping/controllers/ShippingController.java",
+        "start_line": 35,
+        "end_line": 47,
+        "text": "\n    @ResponseStatus(HttpStatus.CREATED)\n    @RequestMapping(value = \"/shipping\", method = RequestMethod.POST)\n    public\n    @ResponseBody\n    Shipment postShipping(@RequestBody Shipment shipment) {\n        System.out.println(\"Adding shipment to queue...\");\n        try {\n            rabbitTemplate.convertAndSend(\"shipping-task\", shipment);\n        } catch (Exception e) {\n            System.out.println(\"Unable to add to queue (the queue is probably down). Accepting anyway. Don't do this \" +\n                    \"for real!\");\n        }"
+      },
+      {
+        "repo": "queue-master",
+        "path": "src/main/java/works/weave/socks/queuemaster/ShippingTaskHandler.java",
+        "start_line": 1,
+        "end_line": 18,
+        "text": "package works.weave.socks.queuemaster;\n\nimport org.springframework.beans.factory.annotation.Autowired;\nimport org.springframework.stereotype.Component;\nimport works.weave.socks.shipping.entities.Shipment;\n\n@Component\npublic class ShippingTaskHandler {\n\n\t@Autowired\n\tDockerSpawner docker;\n\n\tpublic void handleMessage(Shipment shipment) {\n\t\tSystem.out.println(\"Received shipment task: \" + shipment.getName());\n\t\t//docker.init();\n\t\t//docker.spawn();\n\t}\n}"
+      }
+    ]
+  },
+  {
+    "question": "Wer erledigt bei der Registrierung eines neuen Kunden welchen Schritt?",
+    "sources": [
+      {
+        "repo": "front-end",
+        "path": "api/user/index.js",
+        "start_line": 180,
+        "end_line": 248,
+        "text": "    app.post(\"/register\", function(req, res, next) {\n        var options = {\n            uri: endpoints.registerUrl,\n            method: 'POST',\n            json: true,\n            body: req.body\n        };\n\n        console.log(\"Posting Customer: \" + JSON.stringify(req.body));\n\n        async.waterfall([\n                function(callback) {\n                    request(options, function(error, response, body) {\n                        if (error !== null ) {\n                            callback(error);\n                            return;\n                        }\n                        if (response.statusCode == 200 && body != null && body != \"\") {\n                            if (body.error) {\n                                callback(body.error);\n                                return;\n                            }\n                            console.log(body);\n                            var customerId = body.id;\n                            console.log(customerId);\n                            req.session.customerId = customerId;\n                            callback(null, customerId);\n                            return;\n                        }\n                        console.log(response.statusCode);\n                        callback(true);\n                    });\n                },\n                function(custId, callback) {\n                    var sessionId = req.session.id;\n                    console.log(\"Merging carts for customer id: \" + custId + \" and session id: \" + sessionId);\n\n                    var options = {\n                        uri: endpoints.cartsUrl + \"/\" + custId + \"/merge\" + \"?sessionId=\" + sessionId,\n                        method: 'GET'\n                    };\n                    request(options, function(error, response, body) {\n                        if (error) {\n                            if(callback) callback(error);\n                            return;\n                        }\n                        console.log('Carts merged.');\n                        if(callback) callback(null, custId);\n                    });\n                }\n            ],\n            function(err, custId) {\n                if (err) {\n                    console.log(\"Error with log in: \" + err);\n                    res.status(500);\n                    res.end();\n                    return;\n                }\n                console.log(\"set cookie\" + custId);\n                res.status(200);\n                res.cookie(cookie_name, req.session.id, {\n                    maxAge: 3600000\n                }).send({id: custId});\n                console.log(\"Sent cookies.\");\n                res.end();\n                return;\n            }\n        );\n    });"
+      },
+      {
+        "repo": "user",
+        "path": "api/service.go",
+        "start_line": 62,
+        "end_line": 71,
+        "text": "func (s *fixedService) Register(username, password, email, first, last string) (string, error) {\n\tu := users.New()\n\tu.Username = username\n\tu.Password = calculatePassHash(password, u.Salt)\n\tu.Email = email\n\tu.FirstName = first\n\tu.LastName = last\n\terr := db.CreateUser(&u)\n\treturn u.UserID, err\n}"
+      },
+      {
+        "repo": "carts",
+        "path": "src/main/java/works/weave/socks/cart/controllers/CartsController.java",
+        "start_line": 35,
+        "end_line": 42,
+        "text": "    @RequestMapping(value = \"/{customerId}/merge\", method = RequestMethod.GET)\n    public void mergeCarts(@PathVariable String customerId, @RequestParam(value = \"sessionId\") String sessionId) {\n        logger.debug(\"Merge carts request received for ids: \" + customerId + \" and \" + sessionId);\n        CartResource sessionCart = new CartResource(cartDAO, sessionId);\n        CartResource customerCart = new CartResource(cartDAO, customerId);\n        customerCart.merge(sessionCart.value().get()).run();\n        delete(sessionId);\n    }"
+      }
+    ]
+  },
+  {
+    "question": "How is the payment service's Service built, and what wraps it before the endpoints get it?",
+    "sources": [
+      {
+        "repo": "payment",
+        "path": "service.go",
+        "start_line": 1,
+        "end_line": 70,
+        "text": "package payment\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n\t\"time\"\n)\n\n// Middleware decorates a service.\ntype Middleware func(Service) Service\n\ntype Service interface {\n\tAuthorise(total float32) (Authorisation, error) // GET /paymentAuth\n\tHealth() []Health                               // GET /health\n}\n\ntype Authorisation struct {\n\tAuthorised bool   `json:\"authorised\"`\n\tMessage    string `json:\"message\"`\n}\n\ntype Health struct {\n\tService string `json:\"service\"`\n\tStatus  string `json:\"status\"`\n\tTime    string `json:\"time\"`\n}\n\n// NewFixedService returns a simple implementation of the Service interface,\n// fixed over a predefined set of socks and tags. In a real service you'd\n// probably construct this with a database handle to your socks DB, etc.\nfunc NewAuthorisationService(declineOverAmount float32) Service {\n\treturn &service{\n\t\tdeclineOverAmount: declineOverAmount,\n\t}\n}\n\ntype service struct {\n\tdeclineOverAmount float32\n}\n\nfunc (s *service) Authorise(amount float32) (Authorisation, error) {\n\tif amount == 0 {\n\t\treturn Authorisation{}, ErrInvalidPaymentAmount\n\t}\n\tif amount < 0 {\n\t\treturn Authorisation{}, ErrInvalidPaymentAmount\n\t}\n\tauthorised := false\n\tmessage := \"Payment declined\"\n\tif amount <= s.declineOverAmount {\n\t\tauthorised = true\n\t\tmessage = \"Payment authorised\"\n\t} else {\n\t\tmessage = fmt.Sprintf(\"Payment declined: amount exceeds %.2f\", s.declineOverAmount)\n\t}\n\treturn Authorisation{\n\t\tAuthorised: authorised,\n\t\tMessage:    message,\n\t}, nil\n}\n\nfunc (s *service) Health() []Health {\n\tvar health []Health\n\tapp := Health{\"payment\", \"OK\", time.Now().String()}\n\thealth = append(health, app)\n\treturn health\n}\n\nvar ErrInvalidPaymentAmount = errors.New(\"Invalid payment amount\")\n"
+      },
+      {
+        "repo": "payment",
+        "path": "logging.go",
+        "start_line": 1,
+        "end_line": 44,
+        "text": "package payment\n\nimport (\n\t\"github.com/go-kit/kit/log\"\n\t\"time\"\n)\n\n// LoggingMiddleware logs method calls, parameters, results, and elapsed time.\nfunc LoggingMiddleware(logger log.Logger) Middleware {\n\treturn func(next Service) Service {\n\t\treturn loggingMiddleware{\n\t\t\tnext:   next,\n\t\t\tlogger: logger,\n\t\t}\n\t}\n}\n\ntype loggingMiddleware struct {\n\tnext   Service\n\tlogger log.Logger\n}\n\nfunc (mw loggingMiddleware) Authorise(amount float32) (auth Authorisation, err error) {\n\tdefer func(begin time.Time) {\n\t\tmw.logger.Log(\n\t\t\t\"method\", \"Authorise\",\n\t\t\t\"result\", auth.Authorised,\n\t\t\t\"took\", time.Since(begin),\n\t\t)\n\t}(time.Now())\n\treturn mw.next.Authorise(amount)\n}\n\nfunc (mw loggingMiddleware) Health() (health []Health) {\n\tdefer func(begin time.Time) {\n\t\tmw.logger.Log(\n\t\t\t\"method\", \"Health\",\n\t\t\t\"result\", len(health),\n\t\t\t\"took\", time.Since(begin),\n\t\t)\n\t}(time.Now())\n\treturn mw.next.Health()\n}\n"
+      },
+      {
+        "repo": "payment",
+        "path": "wiring.go",
+        "start_line": 30,
+        "end_line": 50,
+        "text": "\t{\n\t\tlogger = log.NewLogfmtLogger(os.Stderr)\n\t\tlogger = log.NewContext(logger).With(\"ts\", log.DefaultTimestampUTC)\n\t\tlogger = log.NewContext(logger).With(\"caller\", log.DefaultCaller)\n\t}\n\n\t// Service domain.\n\tvar service Service\n\t{\n\t\tservice = NewAuthorisationService(declineAmount)\n\t\tservice = LoggingMiddleware(logger)(service)\n\t}\n\n\t// Endpoint domain.\n\tendpoints := MakeEndpoints(service, tracer)\n\n\trouter := MakeHTTPHandler(ctx, endpoints, logger, tracer)\n\n\thttpMiddleware := []middleware.Interface{\n\t\tmiddleware.Instrument{\n\t\t\tDuration:     HTTPLatency,"
+      },
+      {
+        "repo": "payment",
+        "path": "endpoints.go",
+        "start_line": 1,
+        "end_line": 30,
+        "text": "package payment\n\nimport (\n\t\"github.com/go-kit/kit/endpoint\"\n\t\"github.com/go-kit/kit/tracing/opentracing\"\n\tstdopentracing \"github.com/opentracing/opentracing-go\"\n\t\"golang.org/x/net/context\"\n)\n\n// Endpoints collects the endpoints that comprise the Service.\ntype Endpoints struct {\n\tAuthoriseEndpoint endpoint.Endpoint\n\tHealthEndpoint    endpoint.Endpoint\n}\n\n// MakeEndpoints returns an Endpoints structure, where each endpoint is\n// backed by the given service.\nfunc MakeEndpoints(s Service, tracer stdopentracing.Tracer) Endpoints {\n\treturn Endpoints{\n\t\tAuthoriseEndpoint: opentracing.TraceServer(tracer, \"POST /paymentAuth\")(MakeAuthoriseEndpoint(s)),\n\t\tHealthEndpoint:    opentracing.TraceServer(tracer, \"GET /health\")(MakeHealthEndpoint(s)),\n\t}\n}\n\n// MakeListEndpoint returns an endpoint via the given service.\nfunc MakeAuthoriseEndpoint(s Service) endpoint.Endpoint {\n\treturn func(ctx context.Context, request interface{}) (response interface{}, err error) {\n\t\tvar span stdopentracing.Span\n\t\tspan, ctx = stdopentracing.StartSpanFromContext(ctx, \"authorize payment\")\n\t\tspan.SetTag(\"service\", \"payment\")"
+      }
+    ]
+  },
+  {
+    "question": "Wie ist der Service des User-Dienstes aufgebaut, und welche Hüllen legen sich um ihn?",
+    "sources": [
+      {
+        "repo": "user",
+        "path": "api/service.go",
+        "start_line": 20,
+        "end_line": 45,
+        "text": "\n// Service is the user service, providing operations for users to login, register, and retrieve customer information.\ntype Service interface {\n\tLogin(username, password string) (users.User, error) // GET /login\n\tRegister(username, password, email, first, last string) (string, error)\n\tGetUsers(id string) ([]users.User, error)\n\tPostUser(u users.User) (string, error)\n\tGetAddresses(id string) ([]users.Address, error)\n\tPostAddress(u users.Address, userid string) (string, error)\n\tGetCards(id string) ([]users.Card, error)\n\tPostCard(u users.Card, userid string) (string, error)\n\tDelete(entity, id string) error\n\tHealth() []Health // GET /health\n}\n\n// NewFixedService returns a simple implementation of the Service interface,\nfunc NewFixedService() Service {\n\treturn &fixedService{}\n}\n\ntype fixedService struct{}\n\ntype Health struct {\n\tService string `json:\"service\"`\n\tStatus  string `json:\"status\"`\n\tTime    string `json:\"time\"`"
+      },
+      {
+        "repo": "user",
+        "path": "api/middlewares.go",
+        "start_line": 1,
+        "end_line": 40,
+        "text": "package api\n\nimport (\n\t\"time\"\n\n\t\"github.com/go-kit/kit/log\"\n\t\"github.com/go-kit/kit/metrics\"\n\t\"github.com/microservices-demo/user/users\"\n)\n\n// Middleware decorates a service.\ntype Middleware func(Service) Service\n\n// LoggingMiddleware logs method calls, parameters, results, and elapsed time.\nfunc LoggingMiddleware(logger log.Logger) Middleware {\n\treturn func(next Service) Service {\n\t\treturn loggingMiddleware{\n\t\t\tnext:   next,\n\t\t\tlogger: logger,\n\t\t}\n\t}\n}\n\ntype loggingMiddleware struct {\n\tnext   Service\n\tlogger log.Logger\n}\n\nfunc (mw loggingMiddleware) Login(username, password string) (user users.User, err error) {\n\tdefer func(begin time.Time) {\n\t\tmw.logger.Log(\n\t\t\t\"method\", \"Login\",\n\t\t\t\"took\", time.Since(begin),\n\t\t)\n\t}(time.Now())\n\treturn mw.next.Login(username, password)\n}\n\nfunc (mw loggingMiddleware) Register(username, password, email, first, last string) (string, error) {\n\tdefer func(begin time.Time) {"
+      },
+      {
+        "repo": "user",
+        "path": "api/middlewares.go",
+        "start_line": 160,
+        "end_line": 180,
+        "text": "}\n\ntype instrumentingService struct {\n\trequestCount   metrics.Counter\n\trequestLatency metrics.Histogram\n\tService\n}\n\n// NewInstrumentingService returns an instance of an instrumenting Service.\nfunc NewInstrumentingService(requestCount metrics.Counter, requestLatency metrics.Histogram, s Service) Service {\n\treturn &instrumentingService{\n\t\trequestCount:   requestCount,\n\t\trequestLatency: requestLatency,\n\t\tService:        s,\n\t}\n}\n\nfunc (s *instrumentingService) Login(username, password string) (users.User, error) {\n\tdefer func(begin time.Time) {\n\t\ts.requestCount.With(\"method\", \"login\").Add(1)\n\t\ts.requestLatency.With(\"method\", \"login\").Observe(time.Since(begin).Seconds())"
+      },
+      {
+        "repo": "user",
+        "path": "main.go",
+        "start_line": 110,
+        "end_line": 140,
+        "text": "\t}\n\n\tfieldKeys := []string{\"method\"}\n\t// Service domain.\n\tvar service api.Service\n\t{\n\t\tservice = api.NewFixedService()\n\t\tservice = api.LoggingMiddleware(logger)(service)\n\t\tservice = api.NewInstrumentingService(\n\t\t\tkitprometheus.NewCounterFrom(\n\t\t\t\tstdprometheus.CounterOpts{\n\t\t\t\t\tNamespace: \"microservices_demo\",\n\t\t\t\t\tSubsystem: \"user\",\n\t\t\t\t\tName:      \"request_count\",\n\t\t\t\t\tHelp:      \"Number of requests received.\",\n\t\t\t\t},\n\t\t\t\tfieldKeys),\n\t\t\tkitprometheus.NewSummaryFrom(stdprometheus.SummaryOpts{\n\t\t\t\tNamespace: \"microservices_demo\",\n\t\t\t\tSubsystem: \"user\",\n\t\t\t\tName:      \"request_latency_microseconds\",\n\t\t\t\tHelp:      \"Total duration of requests in microseconds.\",\n\t\t\t}, fieldKeys),\n\t\t\tservice,\n\t\t)\n\t}\n\n\t// Endpoint domain.\n\tendpoints := api.MakeEndpoints(service, tracer)\n\n\t// HTTP router"
+      }
+    ]
+  },
+  {
+    "question": "Which types make up a customer order in the orders service, and how are they connected?",
+    "sources": [
+      {
+        "repo": "orders",
+        "path": "src/main/java/works/weave/socks/orders/entities/CustomerOrder.java",
+        "start_line": 1,
+        "end_line": 60,
+        "text": "package works.weave.socks.orders.entities;\n\nimport com.fasterxml.jackson.annotation.JsonIgnoreProperties;\nimport org.springframework.data.annotation.Id;\nimport org.springframework.data.mongodb.core.mapping.Document;\n\nimport java.util.Calendar;\nimport java.util.Collection;\nimport java.util.Date;\nimport java.util.List;\n\n// curl -XPOST -H 'Content-type: application/json' http://localhost:8082/orders -d '{\"customer\":\n// \"http://localhost:8080/customer/1\", \"address\": \"http://localhost:8080/address/1\", \"card\":\n// \"http://localhost:8080/card/1\", \"items\": \"http://localhost:8081/carts/1/items\"}'\n\n// curl http://localhost:8082/orders/search/customerId\\?custId\\=1\n\n@JsonIgnoreProperties(ignoreUnknown = true)\n@Document\npublic class CustomerOrder {\n\n    @Id\n    private String id;\n\n    private String customerId;\n\n    private Customer customer;\n\n    private Address address;\n\n    private Card card;\n\n    private Collection<Item> items;\n\n    private Shipment shipment;\n\n    private Date date = Calendar.getInstance().getTime();\n\n    private float total;\n\n    public CustomerOrder() {\n    }\n\n    public CustomerOrder(String id, String customerId, Customer customer, Address address, Card card,\n                         Collection<Item> items, Shipment shipment, Date date, float total) {\n        this.id = id;\n        this.customerId = customerId;\n        this.customer = customer;\n        this.address = address;\n        this.card = card;\n        this.items = items;\n        this.shipment = shipment;\n        this.date = date;\n        this.total = total;\n    }\n\n    @Override\n    public String toString() {\n        return \"CustomerOrder{\" +\n                \"id='\" + id + '\\'' +"
+      },
+      {
+        "repo": "orders",
+        "path": "src/main/java/works/weave/socks/orders/entities/Customer.java",
+        "start_line": 1,
+        "end_line": 45,
+        "text": "package works.weave.socks.orders.entities;\n\n\nimport org.springframework.data.annotation.Id;\nimport org.springframework.data.mongodb.core.mapping.DBRef;\nimport org.springframework.data.mongodb.core.mapping.Document;\n\nimport java.util.ArrayList;\nimport java.util.List;\n\n@Document\npublic class Customer {\n\n    @Id\n    private String id;\n\n    private String firstName;\n    private String lastName;\n    private String username;\n\n    @DBRef(lazy = true)\n    private List<Address> addresses = new ArrayList<>();\n\n    @DBRef(lazy = true)\n    private List<Card> cards = new ArrayList<>();\n\n    public Customer() {\n    }\n\n    public Customer(String id, String firstName, String lastName, String username, List<Address> addresses,\n                    List<Card> cards) {\n        this.id = id;\n        this.firstName = firstName;\n        this.lastName = lastName;\n        this.username = username;\n        this.addresses = addresses;\n        this.cards = cards;\n    }\n\n    public Customer(String firstName, String lastName, String username, List<Address> addresses, List<Card> cards) {\n        this(null, firstName, lastName, username, addresses, cards);\n    }\n\n    @Override\n    public String toString() {"
+      },
+      {
+        "repo": "orders",
+        "path": "src/main/java/works/weave/socks/orders/entities/Item.java",
+        "start_line": 1,
+        "end_line": 20,
+        "text": "package works.weave.socks.orders.entities;\n\nimport org.springframework.data.annotation.Id;\nimport org.springframework.data.mongodb.core.mapping.Document;\n\nimport javax.validation.constraints.NotNull;\n\n@Document\npublic class Item {\n    @Id\n    private String id;\n\n    @NotNull(message = \"Item Id must not be null\")\n    private String itemId;\n    private int quantity;\n    private float unitPrice;\n\n    public Item(String id, String itemId, int quantity, float unitPrice) {\n        this.id = id;\n        this.itemId = itemId;"
+      },
+      {
+        "repo": "orders",
+        "path": "src/main/java/works/weave/socks/orders/entities/Address.java",
+        "start_line": 1,
+        "end_line": 16,
+        "text": "package works.weave.socks.orders.entities;\n\n\nimport org.springframework.data.annotation.Id;\n\npublic class Address {\n\n    @Id\n    private String id;\n\n    private String number;\n    private String street;\n    private String city;\n    private String postcode;\n    private String country;\n"
+      },
+      {
+        "repo": "orders",
+        "path": "src/main/java/works/weave/socks/orders/entities/Card.java",
+        "start_line": 1,
+        "end_line": 13,
+        "text": "package works.weave.socks.orders.entities;\n\nimport org.springframework.data.annotation.Id;\n\npublic class Card {\n\n    @Id\n    private String id;\n\n    private String longNum;\n    private String expires;\n    private String ccv;\n"
+      },
+      {
+        "repo": "orders",
+        "path": "src/main/java/works/weave/socks/orders/entities/Shipment.java",
+        "start_line": 1,
+        "end_line": 8,
+        "text": "package works.weave.socks.orders.entities;\n\nimport java.util.UUID;\n\npublic class Shipment {\n    private String id;\n    private String name;\n"
+      }
+    ]
+  }
+]

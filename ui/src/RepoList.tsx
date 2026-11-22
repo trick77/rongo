@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { shortSha } from "./paths";
-import { MermaidSvg, useDrawn, type FlowNode, type FlowSpec } from "./diagram";
+import { DiagramSvg } from "@trick77/diagram/react";
+import { useDrawn, type FlowNode, type FlowSpec } from "./diagram";
 import { toMermaid } from "./diagramExport";
 import { ModalShell, cancelButton, saveButton } from "./ThreadModals";
 import { Icon } from "./Icon";
@@ -694,7 +695,7 @@ export default function RepoList({ admin = false }: { admin?: boolean }) {
 function Wiring({ spec }: { spec: FlowSpec }) {
   const out = useDrawn(toMermaid(spec));
   if (out === null || "error" in out) return null;
-  return <MermaidSvg svg={out.svg} title="Project wiring" />;
+  return <DiagramSvg svg={out.svg} title="Project wiring" />;
 }
 
 /** ProjectPanel is one product: what it is made of, how its repositories are

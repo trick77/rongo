@@ -1,0 +1,43 @@
+The payment service is created by a constructor that takes the decline threshold as an argument, then wrapped in a logging decorator, and only that wrapped object is handed to the endpoint layer.
+
+### How the service is built
+
+The construction point builds the concrete authorisation service by passing in the decline amount, which becomes the only state it holds: a single threshold. The rule it applies is fixed in the code — an amount of zero or below is rejected with an invalid-amount error, an amount at or under the threshold comes back authorised, and anything above it comes back declined with a message that names the threshold [1]. The threshold itself is supplied at wiring time; where that figure is set is not among the sources.
+
+- Base service: constructed with the decline threshold, implements authorisation and health [1]
+- Authorise rule: zero or negative → error; at or under threshold → authorised; above → declined [1]
+- Health: always reports the payment service as OK with a timestamp [1]
+
+### What wraps it before the endpoints
+
+A logging decorator, built by a factory that takes the logger, returns a wrapper that holds the original service plus the logger; each call is forwarded to the inner service and, on return, records the method, the outcome (authorised flag for a payment, number of health entries) and the elapsed time [2]. The wiring applies exactly one such wrapper — logging — to the base service, and the resulting object is what is passed into endpoint construction [1][3]. The endpoints then each wrap that service call with server-side tracing, one span per route, and the HTTP layer on top adds latency instrumentation to the request handling rather than to the service itself [3][4].
+
+```mermaid
+classDiagram
+    class Service {
+        <<interface>>
+        +Authorise(total float32) Authorisation
+        +Health() Health
+    }
+    class service {
+        -declineOverAmount float32
+        +Authorise(amount float32) Authorisation
+        +Health() Health
+    }
+    class loggingMiddleware {
+        -next Service
+        -logger log.Logger
+        +Authorise(amount float32) Authorisation
+        +Health() Health
+    }
+    class Endpoints {
+        +AuthoriseEndpoint endpoint.Endpoint
+        +HealthEndpoint endpoint.Endpoint
+    }
+    Service <|.. service : base, holds threshold
+    Service <|.. loggingMiddleware : decorates
+    loggingMiddleware --> Service : holds inner next
+    Endpoints --> Service : built from wrapped service
+```
+
+One documentation mismatch worth flagging: the comment above the constructor describes it as returning something "fixed over a predefined set of socks and tags" and suggests a database handle — the code does nothing of the kind; it only stores the decline threshold [1].

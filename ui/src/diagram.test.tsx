@@ -1,176 +1,50 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  render,
+  fireEvent,
+  createEvent,
+  waitFor,
+} from "@testing-library/react";
 
-// The renderer measures text with getBBox, which jsdom lacks, so the tests
-// stand in for it: parse accepts anything that does not say `bad`, and
-// render answers with a marked SVG. What is under test is what diagram.tsx
-// does around the renderer: source selection, the cache, the fallbacks.
-// Like the real one, parse answers false rather than throwing when asked
-// to suppress errors.
-type ParseOpts = { suppressErrors?: boolean };
-const refuse = (src: string, opts?: ParseOpts) => {
-  if (opts?.suppressErrors) return false;
-  throw new Error(`Parse error on line ${src.includes("bad") ? 1 : 2}`);
-};
-const defaultParse = async (src: string, opts?: ParseOpts) => {
-  if (src.includes("bad")) return refuse(src, opts);
-  return { diagramType: src.split(/\s+/)[0] };
-};
-const parse = vi.fn(defaultParse);
-const renderSvg = vi.fn(async (id: string, src: string) => ({
-  svg: `<svg id="${id}" data-src="${src.length}"><g class="drawn"></g></svg>`,
-}));
-vi.mock("mermaid", () => ({
-  default: {
-    initialize: vi.fn(),
-    parse: (s: string, o?: ParseOpts) => parse(s, o),
-    render: (i: string, s: string) => renderSvg(i, s),
-  },
-}));
-
-// rongo's own drawing stands aside by default, so the tests above it keep
-// asserting on the renderer; the ones about it say what it returns.
-const editorial = vi.fn(
-  async (_m: unknown, _src: string, _ids: string): Promise<string | null> =>
-    null,
-);
-vi.mock("./editorial", () => ({
-  editorial: (m: unknown, s: string, i: string) => editorial(m, s, i),
+// The drawing is the package's (@trick77/diagram, tested there): what is
+// under test here is rongo's side of it, the legacy JSON fence, the card's
+// wiring and the full view in rongo's overlay. draw stands in for the
+// package's: it answers with an own drawing, a renderer drawing or a
+// refusal, by the source.
+const draw = vi.fn(async (src: string) => {
+  if (src.includes("bad")) return { error: "Parse error on line 1" };
+  if (src.startsWith("classDiagram"))
+    return { svg: '<svg data-by="renderer"><g class="drawn"></g></svg>' };
+  return {
+    svg: '<svg viewBox="0 0 300 120" width="300"><g class="drawn"></g></svg>',
+    own: true as const,
+  };
+});
+// Hoisted: diagram.tsx calls it as it is imported.
+const { configure } = vi.hoisted(() => ({ configure: vi.fn() }));
+vi.mock("@trick77/diagram/mermaid", async (original) => ({
+  ...(await original<typeof import("@trick77/diagram/mermaid")>()),
+  draw: (src: string) => draw(src),
+  configure: (o: unknown) => configure(o),
 }));
 
 import Diagram, {
-  diagramKind,
   diagramSource,
-  diagramTitle,
-  draw,
   parseDiagram,
-  themeVariables,
   type FlowSpec,
   type SequenceSpec,
 } from "./diagram";
 
+// Read at import, before beforeEach clears the mocks.
+const configured = configure.mock.calls.slice();
+
 beforeEach(() => {
-  parse.mockReset();
-  parse.mockImplementation(defaultParse);
-  renderSvg.mockClear();
-  editorial.mockReset();
-  editorial.mockResolvedValue(null);
+  draw.mockClear();
 });
 
-describe("rongo's own drawing", () => {
-  it("draws a source it covers itself, on its own parse alone", async () => {
-    editorial.mockResolvedValueOnce('<svg data-own="1"></svg>');
-    const out = await draw("flowchart TD\n own --> one");
-    expect(out).toEqual({ svg: '<svg data-own="1"></svg>', own: true });
-    expect(parse).not.toHaveBeenCalled();
-    expect(renderSvg).not.toHaveBeenCalled();
-  });
-
-  it("drops a class mark standing alone on a line before anything reads the source", async () => {
-    editorial.mockResolvedValueOnce('<svg data-own="1"></svg>');
-    await draw("flowchart TD\n  a --> b:::focus\n:::focus");
-    expect(editorial.mock.calls.at(-1)![1]).toBe(
-      "flowchart TD\n  a --> b:::focus",
-    );
-  });
-
-  it("leaves a flowchart it cannot parse to the renderer's refusal", async () => {
-    editorial.mockRejectedValueOnce(new Error("Parse error"));
-    const out = await draw("flowchart TD\n bad -->");
-    expect(out).toEqual({ error: "Parse error on line 1" });
-  });
-
-  it("lets the renderer draw what it declines", async () => {
-    const out = await draw("flowchart TD\n declined --> here");
-    expect(out).toEqual({ svg: expect.stringContaining("drawn") });
-    expect(renderSvg).toHaveBeenCalled();
-  });
-
-  it("never loads its drawing for a kind it does not draw", async () => {
-    await draw("classDiagram\n class A");
-    expect(editorial).not.toHaveBeenCalled();
-  });
-
-  it("lets the renderer draw when its own drawing throws", async () => {
-    editorial.mockRejectedValueOnce(new Error("layout blew up"));
-    const out = await draw("flowchart TD\n throws --> here");
-    expect(out).toEqual({ svg: expect.stringContaining("drawn") });
-  });
-
-  it("fits its drawing to the frame rather than scrolling it", async () => {
-    editorial.mockResolvedValueOnce('<svg data-own="1" width="900"></svg>');
-    const { container, findByLabelText } = render(
-      <Diagram src={"flowchart TD\n wide --> frame"} />,
-    );
-    await findByLabelText(/full view/);
-    expect(container.querySelector(".rongo-diagram svg")).not.toBeNull();
-    expect(container.querySelector(".overflow-x-auto")).toBeNull();
-    // No card ground of its own: the drawing brings its canvas.
-    expect(container.querySelector(".bg-panel")).toBeNull();
-  });
-
-  it("never runs wider than the text it sits in", async () => {
-    editorial.mockResolvedValueOnce('<svg data-own="1" width="900"></svg>');
-    const { findByLabelText } = render(
-      <Diagram src={"flowchart TD\n no --> wider"} />,
-    );
-    const button = await findByLabelText(/full view/);
-    const card = button.closest(".w-max") as HTMLElement;
-    expect(card.className).toContain("max-w-full");
-    expect(
-      (card.parentElement as HTMLElement).getAttribute("style"),
-    ).toBeNull();
-  });
-
-  it("keeps its buttons above the canvas, never over the drawing", async () => {
-    editorial.mockResolvedValueOnce('<svg data-own="1" width="900"></svg>');
-    const { findByLabelText } = render(
-      <Diagram src={"flowchart TD\n tools --> above"} />,
-    );
-    const row = (await findByLabelText(/full view/)).parentElement!;
-    expect(row.className).not.toContain("absolute");
-    expect(row.nextElementSibling?.classList.contains("rongo-diagram")).toBe(
-      true,
-    );
-  });
-});
-
-describe("draw and angle brackets", () => {
-  it("draws the source as written when the escaped one does not parse", async () => {
-    // The renderer refuses the escaped text, every time it is asked.
-    parse.mockImplementation(async (s: string, o?: ParseOpts) =>
-      s.includes("#lt;") ? refuse(s, o) : { diagramType: "sequenceDiagram" },
-    );
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const src = "sequenceDiagram\n  A->>B: List<Order> back";
-    const out = await draw(src);
-    expect(out).toEqual({ svg: expect.stringContaining("drawn") });
-    expect(renderSvg).toHaveBeenLastCalledWith(expect.any(String), src);
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
-  });
-
-  it("does not fall back, nor keep the result, when the escaped text parses but drawing fails", async () => {
-    renderSvg.mockRejectedValueOnce(new Error("chunk gone"));
-    const src = "sequenceDiagram\n  A->>B: Map<K> once";
-    expect(await draw(src)).toEqual({ error: "chunk gone" });
-    // The next attempt draws, with its brackets.
-    expect(await draw(src)).toEqual({ svg: expect.stringContaining("drawn") });
-    expect(renderSvg).toHaveBeenLastCalledWith(
-      expect.any(String),
-      "sequenceDiagram\n  A->>B: Map#lt;K#gt; once",
-    );
-  });
-
-  it("quotes the source as written when neither parses", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const out = await draw("sequenceDiagram\n  bad A->>B: List<Order>");
-    expect(out).toEqual({ error: "Parse error on line 1" });
-    expect(parse).toHaveBeenLastCalledWith(
-      "sequenceDiagram\n  bad A->>B: List<Order>",
-      undefined,
-    );
-    warn.mockRestore();
+describe("the package's drawing", () => {
+  it("names every drawing rongo's, so its ids stay apart from the page's", () => {
+    expect(configured).toEqual([[{ ids: "rongo-diagram" }]]);
   });
 });
 
@@ -288,50 +162,6 @@ describe("diagramSource", () => {
   });
 });
 
-describe("diagramKind and diagramTitle", () => {
-  it("reads the type off the first word, past directives and blank lines", () => {
-    expect(diagramKind("flowchart LR\n a-->b")).toBe("flowchart");
-    expect(diagramKind("\n%%{init: {}}%%\nsequenceDiagram\n A->>B: x")).toBe(
-      "sequenceDiagram",
-    );
-    expect(diagramKind("stateDiagram-v2\n [*] --> A")).toBe("stateDiagram-v2");
-    expect(diagramKind("")).toBe("");
-    expect(diagramKind('{"type":"flow"}')).toBe("");
-  });
-
-  it("names the picture by its type and falls back to Diagram", () => {
-    expect(diagramTitle("flowchart TD\n a")).toBe("Flow diagram");
-    expect(diagramTitle("graph LR\n a")).toBe("Flow diagram");
-    expect(diagramTitle("sequenceDiagram\n A->>B: x")).toBe("Sequence diagram");
-    expect(diagramTitle("stateDiagram-v2\n a")).toBe("State diagram");
-    expect(diagramTitle("erDiagram\n A ||--o{ B : has")).toBe("Entity diagram");
-    expect(diagramTitle("classDiagram\n class A")).toBe("Class diagram");
-    expect(diagramTitle("gantt\n title x")).toBe("Diagram");
-  });
-});
-
-describe("draw", () => {
-  it("renders a source once, however often it is asked for", async () => {
-    const src = "flowchart LR\n once --> twice";
-    const a = await draw(src);
-    const b = await draw(src);
-    expect(a).toBe(b);
-    expect(renderSvg).toHaveBeenCalledTimes(1);
-  });
-
-  it("answers a refused source with the parser's complaint, not a throw", async () => {
-    const out = await draw("flowchart LR\n bad[");
-    expect(out).toEqual({ error: "Parse error on line 1" });
-    expect(renderSvg).not.toHaveBeenCalled();
-  });
-
-  it("keeps a drawing but not a refusal, so a chunk that failed to load is tried again", async () => {
-    await draw("flowchart LR\n bad[ again");
-    await draw("flowchart LR\n bad[ again");
-    expect(parse).toHaveBeenCalledTimes(2);
-  });
-});
-
 describe("Diagram", () => {
   it("says a picture is on its way, then draws it", async () => {
     const { container, getByText } = render(
@@ -371,6 +201,25 @@ describe("Diagram", () => {
     expect(getByLabelText("Sequence diagram: download SVG")).toBeTruthy();
   });
 
+  it("keeps the buttons above its own drawing, on no ground of its own", async () => {
+    const { container, findByLabelText } = render(
+      <Diagram src={"flowchart TD\n tools --> above"} />,
+    );
+    const row = (await findByLabelText(/full view/)).parentElement!;
+    expect(row.className).not.toContain("absolute");
+    expect(container.querySelector(".bg-panel")).toBeNull();
+  });
+
+  it("frames the renderer's drawing, its buttons over the frame's corner", async () => {
+    const { container, findByLabelText } = render(
+      <Diagram src={"classDiagram\n class A"} />,
+    );
+    const row = (await findByLabelText("Class diagram: full view"))
+      .parentElement!;
+    expect(row.className).toContain("absolute");
+    expect(container.querySelector(".bg-panel svg")).not.toBeNull();
+  });
+
   it("opens the full view on the button and closes it again", async () => {
     const { getByLabelText, queryByRole } = render(
       <Diagram src={"sequenceDiagram\n A->>B: y"} />,
@@ -387,20 +236,7 @@ describe("Diagram", () => {
   });
 
   it("downloads the drawing under the kind of picture it is", async () => {
-    let written = "";
-    Object.defineProperty(URL, "createObjectURL", {
-      configurable: true,
-      value: () => "blob:x",
-    });
-    Object.defineProperty(URL, "revokeObjectURL", {
-      configurable: true,
-      value: () => {},
-    });
-    const click = vi
-      .spyOn(HTMLAnchorElement.prototype, "click")
-      .mockImplementation(function (this: HTMLAnchorElement) {
-        written = this.download;
-      });
+    const saved = saving();
     const { getByLabelText } = render(
       <Diagram src={"stateDiagram-v2\n [*] --> A"} />,
     );
@@ -408,54 +244,147 @@ describe("Diagram", () => {
       expect(getByLabelText("State diagram: download SVG")).toBeTruthy(),
     );
     fireEvent.click(getByLabelText("State diagram: download SVG"));
-    expect(written).toBe("rongo-state-diagram.svg");
-    click.mockRestore();
+    expect(saved.name).toBe("rongo-state-diagram.svg");
   });
 });
 
-describe("themeVariables", () => {
-  // The tokens live in index.css, which jsdom does not load, so the test sets
-  // the handful it asserts on directly. An inline custom property resolves
-  // through getComputedStyle, which is the path themeVariables reads.
-  const tokens: Record<string, string> = {
-    "--color-panel": "#1b1b1a",
-    "--color-border": "#323230",
-    "--color-border-soft": "#2a2a28",
-    "--color-faint": "#6f6d66",
-    "--color-muted": "#9c9a92",
-  };
+// Read before any test stubs them.
+const originalCreateObjectURL = URL.createObjectURL;
+const originalRevokeObjectURL = URL.revokeObjectURL;
 
-  beforeEach(() => {
-    for (const [name, value] of Object.entries(tokens)) {
-      document.documentElement.style.setProperty(name, value);
-    }
-    return () => {
-      for (const name of Object.keys(tokens)) {
-        document.documentElement.style.removeProperty(name);
-      }
-    };
+/** What saving() replaced, put back after every test whatever it asserted:
+ * a failed expectation must not leave the next test a stubbed URL or a
+ * mocked click. */
+const restores: (() => void)[] = [];
+afterEach(async () => {
+  // The package revokes the URL on a timer after the click: let it run
+  // against the stub before the stub goes.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  while (restores.length > 0) restores.pop()!();
+});
+
+/** saving catches a download's file name. */
+function saving(): { name: string } {
+  const out = { name: "" };
+  for (const key of ["createObjectURL", "revokeObjectURL"] as const) {
+    const was = Object.getOwnPropertyDescriptor(URL, key);
+    Object.defineProperty(URL, key, {
+      configurable: true,
+      value: key === "createObjectURL" ? () => "blob:x" : () => {},
+    });
+    restores.push(() => {
+      if (was) Object.defineProperty(URL, key, was);
+      else delete (URL as unknown as Record<string, unknown>)[key];
+    });
+  }
+  const click = vi
+    .spyOn(HTMLAnchorElement.prototype, "click")
+    .mockImplementation(function (this: HTMLAnchorElement) {
+      out.name = this.download;
+    });
+  restores.push(() => click.mockRestore());
+  return out;
+}
+
+describe("saving", () => {
+  it("leaves no stub behind for the next test", () => {
+    // Runs after the download tests above: their stubs are gone.
+    expect(vi.isMockFunction(HTMLAnchorElement.prototype.click)).toBe(false);
+    expect(URL.createObjectURL).toBe(originalCreateObjectURL);
+    expect(URL.revokeObjectURL).toBe(originalRevokeObjectURL);
+  });
+});
+
+/** The full view as rongo opens it: the package's sheet in rongo's overlay,
+ * whose keyboard and scrim are rongo's to keep. */
+describe("the full view", () => {
+  async function view() {
+    const r = render(
+      <Diagram
+        src={
+          "sequenceDiagram\n  Ask->>httpapi: POST /api/ask\n  httpapi-->>Ask: stream"
+        }
+      />,
+    );
+    fireEvent.click(await r.findByLabelText("Sequence diagram: full view"));
+    return r;
+  }
+
+  it("opens with the focus on its close button", async () => {
+    const { getByLabelText } = await view();
+    expect(document.activeElement).toBe(getByLabelText("Close"));
   });
 
-  // A frame is only a frame if it reads against the fill it sits on. The border
-  // token is a chrome value, where it separates a panel from the page ground;
-  // against a node fill four points away from it, it draws nothing.
-  it("draws every frame in a colour that reads on the fill", () => {
-    const vars = themeVariables();
-    for (const key of [
-      "primaryBorderColor",
-      "secondaryBorderColor",
-      "actorBorder",
-      "labelBoxBorderColor",
-      "clusterBorder",
-    ]) {
-      expect(vars[key]).toBe(tokens["--color-faint"]);
-    }
+  it("names the picture in its header", async () => {
+    const { getByRole } = await view();
+    expect(getByRole("dialog").getAttribute("aria-label")).toBe(
+      "Sequence diagram",
+    );
+    expect(getByRole("dialog").querySelector("svg .drawn")).toBeTruthy();
   });
 
-  // Quieter than the arrows, so the flow stays the loudest thing drawn.
-  it("keeps the frames quieter than the lines between them", () => {
-    const vars = themeVariables();
-    expect(vars.lineColor).toBe(tokens["--color-muted"]);
-    expect(vars.primaryBorderColor).not.toBe(vars.lineColor);
+  it("closes on Escape", async () => {
+    const { queryByRole } = await view();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(queryByRole("dialog")).toBeNull();
+  });
+
+  it("closes when the scrim itself is clicked, not the sheet", async () => {
+    // The click, not the press: the sheet is gone by the time the click is
+    // dispatched, and it would otherwise land on the answer behind it.
+    const { getByRole, queryByRole } = await view();
+    const dialog = getByRole("dialog");
+    const scrim = dialog.parentElement as HTMLElement;
+
+    fireEvent(dialog, createEvent.pointerDown(dialog, { bubbles: true }));
+    fireEvent.click(dialog);
+    expect(queryByRole("dialog")).not.toBeNull();
+
+    fireEvent(scrim, createEvent.pointerDown(scrim, { bubbles: true }));
+    expect(queryByRole("dialog")).not.toBeNull();
+    fireEvent.click(scrim);
+    expect(queryByRole("dialog")).toBeNull();
+  });
+
+  it("takes a drag across the edge for a drag, not a cancel", async () => {
+    const { getByRole, queryByRole } = await view();
+    const dialog = getByRole("dialog");
+    const scrim = dialog.parentElement as HTMLElement;
+
+    fireEvent(dialog, createEvent.pointerDown(dialog, { bubbles: true }));
+    fireEvent(scrim, createEvent.pointerUp(scrim, { bubbles: true }));
+    fireEvent.click(scrim);
+    expect(queryByRole("dialog")).not.toBeNull();
+
+    fireEvent(scrim, createEvent.pointerDown(scrim, { bubbles: true }));
+    fireEvent(dialog, createEvent.pointerUp(dialog, { bubbles: true }));
+    fireEvent.click(scrim);
+    expect(queryByRole("dialog")).not.toBeNull();
+  });
+
+  it("keeps Tab inside, so it cannot reach the chips behind the scrim", async () => {
+    // Those chips are focusable groups; Enter on one would open SourceView
+    // under this dialog, two z-30 overlays deep.
+    const { getByRole, getByLabelText, getByText } = await view();
+    const dialog = getByRole("dialog");
+    const close = getByLabelText("Close");
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(getByText("Download SVG"));
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  it("draws its chrome in the sans face, not the answer's serif prose", async () => {
+    const { getByRole } = await view();
+    expect(getByRole("dialog").className).toContain("font-sans");
+  });
+
+  it("downloads the picture it is showing", async () => {
+    const saved = saving();
+    const { getByText } = await view();
+    fireEvent.click(getByText("Download SVG"));
+    expect(saved.name).toBe("rongo-sequence-diagram.svg");
   });
 });

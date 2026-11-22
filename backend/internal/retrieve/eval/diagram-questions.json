@@ -1,0 +1,100 @@
+[
+  {
+    "question": "Who does which step when a customer places an order, and where can the order stop?",
+    "kind": "how",
+    "resolution": "composition",
+    "candidates": [
+      {
+        "repo": "front-end",
+        "paths": ["api/orders/index.js"],
+        "verified": "index.js:48 app.post(\"/orders\"), :122 forwards to endpoints.ordersUrl + '/orders'"
+      },
+      {
+        "repo": "orders",
+        "paths": ["src/main/java/works/weave/socks/orders/controllers/OrdersController.java"],
+        "verified": "OrdersController.java:50 POST /orders, :90-96 a missing or unauthorised payment response throws PaymentDeclinedException, :117 customerOrderRepository.save"
+      },
+      {
+        "repo": "payment",
+        "paths": ["service.go"],
+        "verified": "service.go:41-58 Authorise: zero or negative is an error, at or under declineOverAmount authorised, over it declined"
+      },
+      {
+        "repo": "shipping",
+        "paths": ["src/main/java/works/weave/socks/shipping/controllers/ShippingController.java"],
+        "verified": "ShippingController.java:36 POST /shipping, :40 rabbitTemplate.convertAndSend(\"shipping-task\", shipment)"
+      },
+      {
+        "repo": "queue-master",
+        "paths": ["src/main/java/works/weave/socks/queuemaster/ShippingTaskHandler.java"],
+        "verified": "ShippingTaskHandler.java:13 handleMessage(Shipment) prints the shipment name"
+      }
+    ],
+    "note": "Lanes: who does which step across five services, with the payment decision as the branch. The flow corpus asks the same order as 'what happens', which drew sequences and flowcharts."
+  },
+  {
+    "question": "Wer erledigt bei der Registrierung eines neuen Kunden welchen Schritt?",
+    "kind": "how",
+    "resolution": "composition",
+    "candidates": [
+      {
+        "repo": "front-end",
+        "paths": ["api/user/index.js"],
+        "verified": "index.js:180 app.post(\"/register\") posts to endpoints.registerUrl, :205 keeps the new customer id in the session, :218 GET cartsUrl/{custId}/merge?sessionId=, :240 sets the session cookie"
+      },
+      {
+        "repo": "user",
+        "paths": ["api/service.go"],
+        "verified": "service.go:62-71 Register: users.New, password hashed with the salt, db.CreateUser, returns the user id"
+      },
+      {
+        "repo": "carts",
+        "paths": ["src/main/java/works/weave/socks/cart/controllers/CartsController.java"],
+        "verified": "CartsController.java:35-41 GET /{customerId}/merge merges the session's cart into the customer's, then deletes the session's"
+      }
+    ],
+    "note": "Lanes: the shop front, the user service and the cart service each own a step; a failed step ends the registration with an error."
+  },
+  {
+    "question": "How is the payment service's Service built, and what wraps it before the endpoints get it?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "payment",
+        "paths": ["service.go", "logging.go", "wiring.go", "endpoints.go"],
+        "verified": "service.go:12-15 interface Service {Authorise, Health}, :37-39 struct service{declineOverAmount}; logging.go:18-21 loggingMiddleware{next Service, logger}; wiring.go:39-40 NewAuthorisationService then LoggingMiddleware, :44 MakeEndpoints(service); endpoints.go:11-14 Endpoints{AuthoriseEndpoint, HealthEndpoint}"
+      }
+    ],
+    "note": "Class: an interface, its implementation and a decorator that implements and holds the same interface."
+  },
+  {
+    "question": "Wie ist der Service des User-Dienstes aufgebaut, und welche Hüllen legen sich um ihn?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "user",
+        "paths": ["api/service.go", "api/middlewares.go", "main.go"],
+        "verified": "service.go:22-33 interface Service (Login, Register, GetUsers, PostUser, GetAddresses, PostAddress, GetCards, PostCard, Delete, Health), :40 fixedService; middlewares.go:24 loggingMiddleware, :162 instrumentingService; main.go:116-118 NewFixedService, LoggingMiddleware, NewInstrumentingService, :138 MakeEndpoints"
+      }
+    ],
+    "note": "Class: two decorators around one implementation of a ten-method interface; past ten members a class the package hands the picture to the renderer."
+  },
+  {
+    "question": "Which types make up a customer order in the orders service, and how are they connected?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "orders",
+        "paths": [
+          "src/main/java/works/weave/socks/orders/entities/CustomerOrder.java",
+          "src/main/java/works/weave/socks/orders/entities/Customer.java"
+        ],
+        "verified": "CustomerOrder.java:20-39 @Document CustomerOrder{id, customerId, Customer, Address, Card, Collection<Item>, Shipment, date, total}; Customer.java:21-25 @DBRef lists of Address and Card"
+      }
+    ],
+    "note": "Control: stored records, which the prompt keeps an entity diagram. A class diagram here is the class row claiming the entity row's material."
+  }
+]
