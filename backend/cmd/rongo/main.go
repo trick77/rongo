@@ -224,6 +224,8 @@ func main() {
 	// Each repository's index rules, for the pipeline. repos.yaml is read at
 	// start only, so this is the whole of them until the next one.
 	var rules map[string]repos.Index
+	// The branch patterns, for the poller, by the same reasoning.
+	var patterns map[string]*repos.BranchPattern
 	if specs, err := repos.Load(cfg.ReposFile); errors.Is(err, fs.ErrNotExist) {
 		slog.Warn("no repository list; not indexing, and answers come from whatever was indexed before",
 			"path", cfg.ReposFile)
@@ -266,6 +268,7 @@ func main() {
 			indexer.PruneEmbedCacheAndLog(ctx, db, slog.Default(), "purged", len(purged))
 		}
 		rules = indexer.RulesOf(specs)
+		patterns = indexer.PatternsOf(specs)
 		listLoaded = true
 	}
 
@@ -309,6 +312,7 @@ func main() {
 		Index:        pipeline.IndexRepo,
 		History:      commits,
 		HistoryDepth: cfg.HistoryDepth,
+		Patterns:     patterns,
 		// Tokens are read from the environment by the variable name the YAML
 		// entry declared. The value never appears in repos.yaml.
 		Tokens: os.Getenv,

@@ -448,6 +448,33 @@ func (c *Client) HeadSHA(ctx context.Context, spec repos.Spec, branch string) (s
 	return strings.TrimSpace(out), nil
 }
 
+// RemoteBranches lists the branch names Fetch mirrored under
+// refs/remotes/origin/, sorted, for a branch_pattern to choose from.
+//
+// origin/HEAD is left out while it is the symbolic ref a clone writes: it
+// is an alias of the default branch, not a branch. A remote can still serve
+// a real branch called HEAD (written with update-ref; `git branch` refuses
+// the name). Fetch skips it while the alias stands and mirrors it once the
+// alias is gone; then it is a plain ref and listed under its own name.
+func (c *Client) RemoteBranches(ctx context.Context, spec repos.Spec) ([]string, error) {
+	const prefix = "refs/remotes/origin/"
+	// %00 between the two fields: a ref name cannot hold a NUL, so the
+	// split is exact whatever the name contains.
+	out, err := c.run(ctx, c.Dir(spec), "for-each-ref", "--format=%(refname)%00%(symref)", prefix)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, line := range nonEmptyLines(out) {
+		ref, symref, _ := strings.Cut(line, "\x00")
+		if symref != "" {
+			continue
+		}
+		names = append(names, strings.TrimPrefix(ref, prefix))
+	}
+	return names, nil
+}
+
 // ChangedPaths lists the paths differing between two commits. This is what
 // keeps a push from costing a full re-index. It stays valid across a branch
 // change too, because both commits live in the same object store.
