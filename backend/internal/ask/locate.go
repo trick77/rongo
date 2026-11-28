@@ -371,9 +371,14 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 		// and a trace reporting fewer rounds than the meter was billed for
 		// is a record disagreeing with the bill.
 		report.Rounds = round + 1
-		turn, err := g.locate.CallTools(ctx, msgs, locateTools(),
-			llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(),
-			llm.WithMaxAnswerTokens(locateMaxTokens), llm.WithStep("locate"))
+		opts := []llm.Option{llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(),
+			llm.WithMaxAnswerTokens(locateMaxTokens), llm.WithStep("locate")}
+		if round == g.rounds()-1 {
+			// What follows the last round is the conclusion, without tools:
+			// a different prefix, so a cache write here is never read.
+			opts = append(opts, llm.WithoutCache())
+		}
+		turn, err := g.locate.CallTools(ctx, msgs, locateTools(), opts...)
 		if err != nil && ctx.Err() == nil {
 			// A fan-out that ran into the output cap still carries every call
 			// before the one it was cut in: kept, and the round goes on.
@@ -679,6 +684,14 @@ func isIdentRune(r rune) bool {
 //
 // Never fails the turn: a conclusion that does not arrive costs the answer its
 // pointer and nothing else, and the landings are already in the sources.
+//
+// No tools, on purpose, though it then reads nothing the rounds cached (tools
+// render first; the last round is sent unmarked for that reason). The same
+// tools with tool_choice none would keep only the tools and system cached: a
+// tool_choice change invalidates the messages cache. And a profile whose
+// tool_choice_values are auto alone cannot be told none: under the gate's
+// BestEffort llmwire drops it and keeps the tools offered, so the conclusion
+// could come back as a call instead of the sentence.
 func (g *Gatherer) conclude(ctx context.Context, msgs []llm.ToolMessage) string {
 	msgs = append(msgs, llm.ToolMessage{Role: "user", Content: locateConclude})
 	turn, err := g.locate.CallTools(ctx, msgs, nil,

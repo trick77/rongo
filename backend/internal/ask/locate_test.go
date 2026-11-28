@@ -11,7 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trick77/toolkit/llmwire/llmwiretest"
+
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/llm/llmtest"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -454,6 +457,34 @@ func TestLocate_concludesEvenWhenEveryRoundWentOnTools(t *testing.T) {
 	}
 	if !strings.Contains(report.Found, "ConverterPetRegistry") {
 		t.Errorf("Found = %q, want the place it read", report.Found)
+	}
+}
+
+func TestLocate_theLastRoundIsNotMarkedForTheCache(t *testing.T) {
+	// The round after the last one is the conclusion, sent without tools: a
+	// different prefix that reads nothing the last round wrote. Only a round
+	// that another tool round may follow pays the write premium.
+	for rounds, wantMark := range map[int]bool{1: false, 2: true} {
+		db := gatherDB(t)
+		id := seedChunk(t, db, "HouseholdEntity.java", 0, 100, 120, "anzahlHaustiere",
+			"private Integer anzahlHaustiere;")
+		srv := llmwiretest.NewServer(t)
+		c, err := llm.NewClient(llm.Config{BaseURL: srv.URL, APIKey: "k", Registry: llmtest.Registry(),
+			Answer: llmwiretest.MessagesModel, Gate: llmwiretest.MessagesModel}, srv.Server.Client())
+		if err != nil {
+			t.Fatal(err)
+		}
+		g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+			WithLocateLoop(c, locateSearcher{}).WithLocateRounds(rounds)
+
+		if _, _, err := g.Locate(context.Background(), "Wie wird die Anzahl Haustiere an Ledger uebermittelt?",
+			[]Source{sourceOf(t, db, id)}, nil, false, nil); err != nil {
+			t.Fatalf("rounds=%d: Locate: %v", rounds, err)
+		}
+
+		if got := srv.Requests()[0].Body["cache_control"] != nil; got != wantMark {
+			t.Errorf("rounds=%d: first round marked = %v, want %v", rounds, got, wantMark)
+		}
 	}
 }
 

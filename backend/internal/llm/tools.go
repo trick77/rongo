@@ -144,7 +144,20 @@ func (c *Client) CallTools(ctx context.Context, msgs []ToolMessage, tools []Tool
 	req := c.request(nil, o)
 	req.Messages = wireMessages(msgs)
 	req.Tools = wireTools(tools)
-	req.ToolChoice = llmwire.ToolChoice{Mode: llmwire.ToolChoiceAuto}
+	if len(tools) > 0 {
+		req.ToolChoice = llmwire.ToolChoice{Mode: llmwire.ToolChoiceAuto}
+		// A round with tools is usually followed by one that resends it
+		// extended by its results: the conversation is the prefix that comes
+		// back. A call without tools (locate's conclusion) differs from the
+		// rounds' prefix at the tools and reads none of it, so neither it nor
+		// the round right before it (WithoutCache) is marked: the write
+		// premium would buy nothing. A round the model ends by answering
+		// still pays it; that is known only after the call. Never on
+		// Client.request: every other call is a one-off prefix.
+		if !o.noCache {
+			req.Cache = llmwire.CacheConversation
+		}
+	}
 
 	started := time.Now()
 	resp, warnings, err := c.wire.Chat(ctx, req)

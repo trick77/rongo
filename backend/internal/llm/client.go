@@ -212,6 +212,7 @@ type callOptions struct {
 	pinTemperature bool
 	step           string
 	jsonObject     bool
+	noCache        bool
 	// attemptTimeout bounds ONE attempt, under whatever the caller's context
 	// already allows. Zero means the caller's ceiling is the only bound,
 	// which is what the answer call wants: there is one attempt worth making
@@ -228,6 +229,13 @@ type callOptions struct {
 // defined so the next person finds that table before re-measuring.
 func WithJSONObject() Option {
 	return func(o *callOptions) { o.jsonObject = true }
+}
+
+// WithoutCache sends a tool round without the conversation's cache mark: for
+// the round a caller knows no round with the same tools follows, whose write
+// premium nothing would read.
+func WithoutCache() Option {
+	return func(o *callOptions) { o.noCache = true }
 }
 
 // WithAttemptTimeout bounds one attempt rather than the whole call, so a

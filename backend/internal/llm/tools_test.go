@@ -45,6 +45,139 @@ func TestCallTools_replaysTheModelsOwnTurn(t *testing.T) {
 	}
 }
 
+// messagesClient is a client whose both lanes run the Messages protocol, the
+// one where caching is a mark on the request.
+func messagesClient(t *testing.T) (*Client, *llmwiretest.Server) {
+	t.Helper()
+	srv := llmwiretest.NewServer(t)
+	c, err := NewClient(Config{BaseURL: srv.URL, APIKey: "k", Registry: llmtest.Registry(),
+		Answer: llmwiretest.MessagesModel, Gate: llmwiretest.MessagesModel}, srv.Server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, srv
+}
+
+// systemMarked reports whether the request's system block carries a cache mark.
+func systemMarked(body map[string]any) bool {
+	blocks, _ := body["system"].([]any)
+	for _, b := range blocks {
+		if block, _ := b.(map[string]any); block["cache_control"] != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func TestCallTools_aRoundWithToolsCachesTheConversation(t *testing.T) {
+	// Given: a locate round, tools on offer. The next round resends this whole
+	// request extended by its results, so it is the prefix worth a mark.
+	c, srv := messagesClient(t)
+	msgs := []ToolMessage{{Role: "system", Content: "Find the place that answers."},
+		{Role: "user", Content: "Wie wird die Anzahl Haustiere an Ledger uebermittelt?"}}
+
+	if _, err := c.CallTools(context.Background(), msgs, locateTools()); err != nil {
+		t.Fatalf("CallTools: %v", err)
+	}
+
+	// Then: the moving breakpoint and the system mark are on the wire.
+	body := srv.Last().Body
+	if body["cache_control"] == nil {
+		t.Error("a tool round went out without the conversation's cache mark")
+	}
+	if !systemMarked(body) {
+		t.Error("a tool round went out without the system block's cache mark")
+	}
+}
+
+func TestCallTools_aCallWithoutToolsIsNotMarked(t *testing.T) {
+	// Given: the locate conclusion, the one call without tools. It ends the
+	// loop, and its prefix differs from the rounds' from the tools on: a mark
+	// would write the whole conversation at the write premium for nothing to
+	// read.
+	c, srv := messagesClient(t)
+	msgs := []ToolMessage{{Role: "system", Content: "Find the place that answers."},
+		{Role: "user", Content: "Stop looking."}}
+
+	if _, err := c.CallTools(context.Background(), msgs, nil); err != nil {
+		t.Fatalf("CallTools: %v", err)
+	}
+
+	if body := srv.Last().Body; body["cache_control"] != nil || systemMarked(body) {
+		t.Errorf("a call without tools carried a cache mark: %v", body)
+	}
+	// Nor a tool choice: llmwire drops one with no tools and warns, a warning
+	// every conclusion would log.
+	if body := srv.Last().Body; body["tool_choice"] != nil {
+		t.Errorf("tool_choice = %v on a call without tools", body["tool_choice"])
+	}
+}
+
+func TestCallTools_withoutCacheSendsNoMarkThoughToolsAreOffered(t *testing.T) {
+	// The loop's last round: tools on offer, but what follows is the
+	// conclusion, which sends no tools and so reads none of it.
+	c, srv := messagesClient(t)
+	msgs := []ToolMessage{{Role: "system", Content: "Find the place that answers."}, {Role: "user", Content: "q"}}
+
+	if _, err := c.CallTools(context.Background(), msgs, locateTools(), WithoutCache()); err != nil {
+		t.Fatalf("CallTools: %v", err)
+	}
+
+	body := srv.Last().Body
+	if body["cache_control"] != nil || systemMarked(body) {
+		t.Errorf("WithoutCache still carried a cache mark: %v", body)
+	}
+	if body["tools"] == nil || body["tool_choice"] == nil {
+		t.Errorf("WithoutCache dropped the tools: %v", body)
+	}
+}
+
+func TestComplete_aOneOffCallIsNotMarked(t *testing.T) {
+	// Answer, rerank, route, gap, title, followups: one-off prefixes. A mark
+	// on any of them is a surcharge with no read behind it.
+	c, srv := messagesClient(t)
+	msgs := []Message{{Role: "system", Content: "Answer from the sources."}, {Role: "user", Content: "q"}}
+
+	if _, _, err := c.Complete(context.Background(), msgs); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	if body := srv.Last().Body; body["cache_control"] != nil || systemMarked(body) {
+		t.Errorf("a one-off call carried a cache mark: %v", body)
+	}
+}
+
+func TestCallTools_cachedTokensCountTowardThePrompt(t *testing.T) {
+	// Given: a Messages reply whose input lanes are disjoint: input_tokens is
+	// only the uncached part. The turn ceiling reads the meter's total, so a
+	// cached round counted as its 4 uncached tokens would let a loop run past
+	// it.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"type": "message", "role": "assistant",
+			"content":     []any{map[string]any{"type": "text", "text": "FOUND: x"}},
+			"stop_reason": "end_turn",
+			"usage": map[string]any{"input_tokens": 4, "output_tokens": 5,
+				"cache_read_input_tokens": 11215, "cache_creation_input_tokens": 300}})
+	}))
+	t.Cleanup(srv.Close)
+	c, err := NewClient(Config{BaseURL: srv.URL, APIKey: "k", Registry: llmtest.Registry(),
+		Answer: llmwiretest.MessagesModel, Gate: llmwiretest.MessagesModel}, srv.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	meter := usage.New()
+	ctx := usage.WithMeter(context.Background(), meter)
+
+	if _, err := c.CallTools(ctx, []ToolMessage{{Role: "user", Content: "q"}}, locateTools()); err != nil {
+		t.Fatalf("CallTools: %v", err)
+	}
+
+	if got, want := meter.Total(), 4+11215+300+5; got != want {
+		t.Errorf("meter total = %d, want %d: every input lane counted", got, want)
+	}
+}
+
 func TestToolTurn_assistantIsRebuiltOnceTheCallsChange(t *testing.T) {
 	// Given: a turn with two calls, and the replay items that carry both.
 	calls := []ToolCall{{ID: "a", Name: "grep", Arguments: "{}"}, {ID: "b", Name: "grep", Arguments: "{}"}}
