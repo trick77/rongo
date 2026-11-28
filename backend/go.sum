@@ -14,8 +14,8 @@ github.com/trick77/ship/kit v0.22.0 h1:TcdewoOha26SzH1ZTTw/QLYzrIHbXxGBJ0ktc5ARi
 github.com/trick77/ship/kit v0.22.0/go.mod h1:cE+kQhN2nb5j2ML174YKdGrC41M2GxnILzQLqFupsHE=
 github.com/trick77/ship/kit/auth v0.4.2 h1:MzR0wC44RH0EO0F6gdOLDq8/M/kZ20oyre9NZobcttg=
 github.com/trick77/ship/kit/auth v0.4.2/go.mod h1:DqX8JBv8lh6ATfmtVeobuFnHyerXxztamGJYLWXuUoU=
-github.com/trick77/toolkit v0.4.0 h1:Wc5p/IH6fiqp3Yuub/USJ7/tE8du7wbUxq9L41/a40U=
-github.com/trick77/toolkit v0.4.0/go.mod h1:8o2jn+f4FxaWh0Z2CLCAuhaEmR+morfaMG/LPjuobJE=
+github.com/trick77/toolkit v0.11.0 h1:1LBpmKcnYZgYwxxFbvBhaajTBgw6wS2oy6ki8BYSLK8=
+github.com/trick77/toolkit v0.11.0/go.mod h1:J+/cmhqFbq4OLUS9BoRYv7/+qknHYSoqrDxZsUlORMA=
 go.yaml.in/yaml/v3 v3.0.6 h1:zcDfvjXEqTQmpjniUBLc91xYJMB2c4QOFxEF/LCEckM=
 go.yaml.in/yaml/v3 v3.0.6/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=
 golang.org/x/crypto v0.59.0 h1:xS2jhqYbzNrpvkWP2YTDf4TJwBy3ykR03i8vFDxEc7c=
