@@ -7,7 +7,7 @@ require (
 	github.com/ncruces/go-sqlite3 v0.23.3
 	github.com/trick77/ship/kit v0.22.0
 	github.com/trick77/ship/kit/auth v0.4.2
-	github.com/trick77/toolkit v0.4.0
+	github.com/trick77/toolkit v0.11.0
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/crypto v0.59.0
 	golang.org/x/mod v0.43.0
